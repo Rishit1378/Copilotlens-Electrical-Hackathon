@@ -1,0 +1,15 @@
+{
+  "servers": {
+    "copilotlens": {
+      "command": "python",
+      "args": [
+        "C:/CoPilotLens/mcp_server/server.py",
+        "--repo",
+        "C:/CoPilotLens"
+      ],
+      "env": {
+        "COPILOTLENS_PORT": "8765"
+      }
+    }
+  }
+}

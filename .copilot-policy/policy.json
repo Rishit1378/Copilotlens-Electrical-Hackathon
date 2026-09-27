@@ -1,0 +1,151 @@
+{
+  "version": "1.0",
+  "repo": "C:\\Users\\Z005878V\\Downloads\\CopilotLens-MCP-main\\CopilotLens-MCP-main",
+  "updated_at": "2026-09-27T19:48:29Z",
+  "rules": [
+    {
+      "id": "rule-1790454656-1",
+      "rule": "Do not update server",
+      "preferred_approach": "Avoid update server. Seek approved project pattern.",
+      "scope": "project",
+      "rationale": "Developer correction prohibiting specific action",
+      "source_interaction": "Do not update server.py directly",
+      "confidence_level": "MEDIUM",
+      "status": "PENDING",
+      "created_at": "2026-09-26T20:30:56Z",
+      "updated_at": "2026-09-26T20:30:56Z"
+    },
+    {
+      "id": "rule-1790454667-2",
+      "rule": "Do not update server.py directly",
+      "preferred_approach": "Avoid update server.py directly. Seek approved project pattern.",
+      "scope": "server.py",
+      "rationale": "Developer correction prohibiting specific action",
+      "source_interaction": "Do not update server.py directly",
+      "confidence_level": "HIGH",
+      "status": "PENDING",
+      "created_at": "2026-09-26T20:31:07Z",
+      "updated_at": "2026-09-26T20:31:07Z"
+    },
+    {
+      "id": "rule-1790454914-3",
+      "rule": "Do not update server.py directly",
+      "preferred_approach": "Avoid update server.py directly. Seek approved project pattern.",
+      "scope": "server.py",
+      "rationale": "Developer correction prohibiting specific action",
+      "source_interaction": "Do not update server.py directly",
+      "confidence_level": "HIGH",
+      "status": "PENDING",
+      "created_at": "2026-09-26T20:35:14Z",
+      "updated_at": "2026-09-26T20:35:14Z"
+    },
+    {
+      "id": "rule-1790454914-4",
+      "rule": "Always use standard logging in Python modules",
+      "preferred_approach": "Import logging and use logger = logging.getLogger(__name__)",
+      "scope": "python",
+      "rationale": "Standard project logging policy",
+      "source_interaction": "Explicit input",
+      "confidence_level": "HIGH",
+      "status": "APPROVED",
+      "created_at": "2026-09-26T20:35:14Z",
+      "updated_at": "2026-09-26T20:35:14Z"
+    },
+    {
+      "id": "rule-1790454944-5",
+      "rule": "Do not update server.py directly",
+      "preferred_approach": "Avoid update server.py directly. Seek approved project pattern.",
+      "scope": "server.py",
+      "rationale": "Developer correction prohibiting specific action",
+      "source_interaction": "Do not update server.py directly",
+      "confidence_level": "HIGH",
+      "status": "PENDING",
+      "created_at": "2026-09-26T20:35:44Z",
+      "updated_at": "2026-09-26T20:35:44Z"
+    },
+    {
+      "id": "rule-1790454944-6",
+      "rule": "Always use standard logging in Python modules",
+      "preferred_approach": "Import logging and use logger = logging.getLogger(__name__)",
+      "scope": "python",
+      "rationale": "Standard project logging policy",
+      "source_interaction": "Explicit input",
+      "confidence_level": "HIGH",
+      "status": "APPROVED",
+      "created_at": "2026-09-26T20:35:44Z",
+      "updated_at": "2026-09-26T20:35:44Z"
+    },
+    {
+      "id": "rule-1790455343-7",
+      "rule": "Do not update server.py directly",
+      "preferred_approach": "Avoid update server.py directly. Seek approved project pattern.",
+      "scope": "server.py",
+      "rationale": "Developer correction prohibiting specific action",
+      "source_interaction": "Do not update server.py directly",
+      "confidence_level": "HIGH",
+      "status": "PENDING",
+      "created_at": "2026-09-26T20:42:23Z",
+      "updated_at": "2026-09-26T20:42:23Z"
+    },
+    {
+      "id": "rule-1790455343-8",
+      "rule": "Always use standard logging in Python modules",
+      "preferred_approach": "Import logging and use logger = logging.getLogger(__name__)",
+      "scope": "python",
+      "rationale": "Standard project logging policy",
+      "source_interaction": "Explicit input",
+      "confidence_level": "HIGH",
+      "status": "APPROVED",
+      "created_at": "2026-09-26T20:42:23Z",
+      "updated_at": "2026-09-26T20:42:23Z"
+    },
+    {
+      "id": "rule-1790538317-9",
+      "rule": "Do not update server.py directly",
+      "preferred_approach": "Avoid update server.py directly. Seek approved project pattern.",
+      "scope": "server.py",
+      "rationale": "Developer correction prohibiting specific action",
+      "source_interaction": "Do not update server.py directly",
+      "confidence_level": "HIGH",
+      "status": "PENDING",
+      "created_at": "2026-09-27T19:45:17Z",
+      "updated_at": "2026-09-27T19:45:17Z"
+    },
+    {
+      "id": "rule-1790538317-10",
+      "rule": "Always use standard logging in Python modules",
+      "preferred_approach": "Import logging and use logger = logging.getLogger(__name__)",
+      "scope": "python",
+      "rationale": "Standard project logging policy",
+      "source_interaction": "Explicit input",
+      "confidence_level": "HIGH",
+      "status": "APPROVED",
+      "created_at": "2026-09-27T19:45:17Z",
+      "updated_at": "2026-09-27T19:45:17Z"
+    },
+    {
+      "id": "rule-1790538509-11",
+      "rule": "Do not update server.py directly",
+      "preferred_approach": "Avoid update server.py directly. Seek approved project pattern.",
+      "scope": "server.py",
+      "rationale": "Developer correction prohibiting specific action",
+      "source_interaction": "Do not update server.py directly",
+      "confidence_level": "HIGH",
+      "status": "PENDING",
+      "created_at": "2026-09-27T19:48:29Z",
+      "updated_at": "2026-09-27T19:48:29Z"
+    },
+    {
+      "id": "rule-1790538509-12",
+      "rule": "Always use standard logging in Python modules",
+      "preferred_approach": "Import logging and use logger = logging.getLogger(__name__)",
+      "scope": "python",
+      "rationale": "Standard project logging policy",
+      "source_interaction": "Explicit input",
+      "confidence_level": "HIGH",
+      "status": "APPROVED",
+      "created_at": "2026-09-27T19:48:29Z",
+      "updated_at": "2026-09-27T19:48:29Z"
+    }
+  ]
+}

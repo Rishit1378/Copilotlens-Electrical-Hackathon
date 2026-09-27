@@ -1,0 +1,35 @@
+# Local intelligence cache & generated outputs
+.copilotlens_cache.json
+.dashboard_cache.json
+coverity_findings.json
+_analysis_sizes.txt
+*.log
+
+# Python cache & virtual environments
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+ENV/
+env/
+
+# Node.js & Next.js build outputs
+node_modules/
+.next/
+out/
+dist/
+build/
+.next-build/
+
+# IDE & OS settings
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Demo repositories
+demo_project/

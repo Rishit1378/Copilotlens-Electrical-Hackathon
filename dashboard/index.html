@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CopilotLens — Codebase Intelligence Dashboard</title>
+  <meta name="description" content="CopilotLens: Real-time codebase intelligence for GitHub Copilot." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.28.1/cytoscape.min.js"></script>
+  <script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<!-- ── Header ─────────────────────────────────────────────────────────────── -->
+<header class="header">
+  <div class="header-inner">
+    <div class="brand">
+      <div class="brand-icon">
+        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <circle cx="12" cy="12" r="10" stroke="url(#g1)" stroke-width="1.5"/>
+          <path d="M8 12L11 15L16 9" stroke="url(#g1)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          <defs>
+            <linearGradient id="g1" x1="2" y1="2" x2="22" y2="22" gradientUnits="userSpaceOnUse">
+              <stop stop-color="#7C3AED"/><stop offset="1" stop-color="#06B6D4"/>
+            </linearGradient>
+          </defs>
+        </svg>
+      </div>
+      <div>
+        <h1 class="brand-name">CopilotLens</h1>
+        <p class="brand-tagline">Codebase Intelligence for GitHub Copilot</p>
+      </div>
+    </div>
+    <div class="header-right">
+      <div class="repo-badge" id="repo-path">—</div>
+      <div class="status-indicator">
+        <span class="status-dot" id="status-dot"></span>
+        <span id="status-text">Connecting...</span>
+      </div>
+      <button class="btn-sync" onclick="syncCopilotInstructions()" title="Sync Copilot Instructions (.github/copilot-instructions.md)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 2v8m0 0l3-3m-3 3L9 7"></path>
+          <path d="M20 12v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-6"></path>
+        </svg>
+        <span>⚡ Sync Copilot</span>
+      </button>
+      <button class="btn-refresh" onclick="loadData()" title="Refresh">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="23 4 23 10 17 10"></polyline>
+          <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+        </svg>
+      </button>
+    </div>
+  </div>
+</header>
+
+<!-- ── Main Content ──────────────────────────────────────────────────────────── -->
+<main class="main">
+
+  <!-- Score Hero -->
+  <section class="hero-section">
+    <div class="hero-score-card" id="hero-card">
+      <div class="score-ring-container">
+        <canvas id="scoreRing" width="130" height="130"></canvas>
+        <div class="score-center">
+          <span class="score-number" id="avg-score">—</span>
+          <span class="score-label">/ 100</span>
+        </div>
+      </div>
+      <div class="score-info">
+        <div class="score-grade" id="score-grade">—</div>
+        <div class="score-interpretation" id="score-interpretation">Loading analysis...</div>
+        <div class="score-meta-grid">
+          <div class="score-meta-item">
+            <span class="meta-value" id="total-files">—</span>
+            <span class="meta-label">Files Analyzed</span>
+          </div>
+          <div class="score-meta-item">
+            <span class="meta-value" id="total-commits">—</span>
+            <span class="meta-label">Commits (90d)</span>
+          </div>
+          <div class="score-meta-item">
+            <span class="meta-value" id="contributors">—</span>
+            <span class="meta-label">Contributors</span>
+          </div>
+          <div class="score-meta-item">
+            <span class="meta-value" id="critical-count">—</span>
+            <span class="meta-label">Critical Files</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="distribution-card">
+      <div class="card-header">
+        <h2 class="card-title">Health Distribution</h2>
+        <span class="card-badge">All Files</span>
+      </div>
+      <canvas id="distributionChart"></canvas>
+    </div>
+  </section>
+
+  <!-- Tab Navigation -->
+  <div class="tab-nav">
+    <button class="tab-btn active" onclick="switchTab('graph', this)">🕸️ Visual Graph</button>
+    <button class="tab-btn" onclick="switchTab('coverity', this)">🛡️ Coverity Scan</button>
+    <button class="tab-btn" onclick="switchTab('policy', this)">📜 Policy & Rules</button>
+    <button class="tab-btn" onclick="switchTab('smarttest', this)">🧪 Smart Tests & Distiller</button>
+    <button class="tab-btn" onclick="switchTab('hotspots', this)">🔥 Hotspots</button>
+    <button class="tab-btn" onclick="switchTab('health', this)">🏥 Health</button>
+    <button class="tab-btn" onclick="switchTab('deadcode', this)">🧹 Dead Code (AST)</button>
+    <button class="tab-btn" onclick="switchTab('dependencies', this)">🔗 Dependencies</button>
+    <button class="tab-btn" onclick="switchTab('cochange', this)">🔄 Co-Changes</button>
+    <button class="tab-btn" onclick="switchTab('blastradius', this)">⚡ Blast Radius</button>
+    <button class="tab-btn" onclick="switchTab('owners', this)">👥 Ownership</button>
+  </div>
+
+  <!-- Visual Graphify Tab -->
+  <section class="tab-panel active" id="tab-graph">
+    <div class="section-header" style="display: flex; justify-content: space-between; align-items: flex-end;">
+      <div>
+        <h2>🕸️ Interactive Graphify Knowledge Map</h2>
+        <p>Real-time force layout of codebase modules, hub centrality, circular imports, and blast radius simulation</p>
+      </div>
+      <div class="graph-legend">
+        <span class="legend-item"><span class="dot red"></span> High Churn / Low Health</span>
+        <span class="legend-item"><span class="dot amber"></span> Hub File</span>
+        <span class="legend-item"><span class="dot green"></span> Healthy</span>
+        <span class="legend-item"><span class="dot purple"></span> Circular Dep</span>
+      </div>
+    </div>
+
+    <div class="graph-controls-bar">
+      <input type="text" id="graph-search" placeholder="🔍 Search node (e.g. server.py)..." oninput="searchGraphNode(this.value)" />
+      <select id="graph-layout" onchange="changeGraphLayout(this.value)">
+        <option value="cose">Force Layout (Cose)</option>
+        <option value="concentric">Concentric Circles</option>
+        <option value="circle">Ring Layout</option>
+        <option value="breadthfirst">Hierarchical Tree</option>
+      </select>
+      <button class="graph-btn" onclick="resetGraphView()">Fit View</button>
+      <button class="graph-btn" onclick="toggleHubsOnly()">Filter Hubs</button>
+    </div>
+
+    <div class="graph-layout-wrapper">
+      <div id="cy-container">
+        <div id="cy"></div>
+      </div>
+      <div class="graph-sidebar" id="graph-sidebar">
+        <h3 class="sidebar-title" id="node-detail-title">Select a Node</h3>
+        <p class="sidebar-sub" id="node-detail-sub">Click any file node to inspect centrality and simulate blast radius ripple effects.</p>
+        <div id="node-detail-body">
+          <div class="placeholder-msg">Hover or click a node in the graph</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Coverity Scan Tab -->
+  <section class="tab-panel" id="tab-coverity">
+    <div class="section-header" style="display: flex; justify-content: space-between; align-items: center;">
+      <div>
+        <h2>🛡️ Coverity Static Analysis Scan</h2>
+        <p>Defects and rule violations failing Coverity SAST checks — stored in <code>coverity_findings.json</code> and updated live</p>
+      </div>
+      <div style="display: flex; gap: 10px;">
+        <button class="btn-sync" onclick="triggerCoverityScan()" style="background: linear-gradient(135deg, #3B82F6 0%, #1D4ED8 100%);">⚡ Run Coverity Rule Check</button>
+        <button class="btn-sync" onclick="openImportCoverityModal()" style="background: var(--card-bg); border: 1px solid var(--border-color); color: var(--text-main);">📥 Import Coverity JSON</button>
+      </div>
+    </div>
+
+    <!-- Coverity Metrics Cards -->
+    <div class="coverity-metrics-grid" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 20px;">
+      <div class="card metric-card" style="padding: 16px;">
+        <div class="metric-label" style="font-size: 12px; color: var(--text-muted);">Total Coverity CIDs</div>
+        <div class="metric-value" id="cov-total-defects" style="font-size: 28px; font-weight: 700; color: var(--accent-light);">—</div>
+        <div class="metric-sub" id="cov-json-file" style="font-size: 11px; color: var(--text-muted); text-overflow: ellipsis; overflow: hidden;">coverity_findings.json</div>
+      </div>
+      <div class="card metric-card" style="padding: 16px;">
+        <div class="metric-label" style="font-size: 12px; color: var(--text-muted);">Rule Compliance Score</div>
+        <div class="metric-value" id="cov-compliance-score" style="font-size: 28px; font-weight: 700; color: #10B981;">— %</div>
+        <div class="metric-sub" style="font-size: 11px; color: var(--text-muted);">SAST Standard Grade</div>
+      </div>
+      <div class="card metric-card" style="padding: 16px;">
+        <div class="metric-label" style="font-size: 12px; color: var(--text-muted);">High Severity Issues</div>
+        <div class="metric-value" id="cov-high-severity" style="font-size: 28px; font-weight: 700; color: #EF4444;">—</div>
+        <div class="metric-sub" style="font-size: 11px; color: var(--text-muted);">Requires Immediate Remediation</div>
+      </div>
+      <div class="card metric-card" style="padding: 16px;">
+        <div class="metric-label" style="font-size: 12px; color: var(--text-muted);">Affected Files</div>
+        <div class="metric-value" id="cov-affected-files" style="font-size: 28px; font-weight: 700; color: var(--text-heading);">—</div>
+        <div class="metric-sub" style="font-size: 11px; color: var(--text-muted);">Files with Defect Markers</div>
+      </div>
+    </div>
+
+    <!-- Filter & Table -->
+    <div class="card" style="padding: 20px;">
+      <div class="filter-bar" style="display: flex; justify-content: space-between; gap: 12px; margin-bottom: 16px;">
+        <input type="text" id="cov-search-input" placeholder="🔍 Search CID, rule (RESOURCE_LEAK, NULL_RETURNS), or file..." oninput="filterCoverityTable()" style="flex: 1; padding: 10px 14px; background: var(--bg-dark); border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-main);" />
+        <select id="cov-severity-select" onchange="filterCoverityTable()" style="padding: 10px 14px; background: var(--bg-dark); border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-main);">
+          <option value="ALL">All Severities</option>
+          <option value="High">High Severity</option>
+          <option value="Medium">Medium Severity</option>
+          <option value="Low">Low Severity</option>
+        </select>
+      </div>
+
+      <div class="table-wrapper" style="overflow-x: auto;">
+        <table class="data-table" id="coverity-table" style="width: 100%; border-collapse: collapse;">
+          <thead>
+            <tr style="text-align: left; border-bottom: 1px solid var(--border-color); color: var(--text-muted); font-size: 12px;">
+              <th style="padding: 12px;">CID</th>
+              <th style="padding: 12px;">Severity</th>
+              <th style="padding: 12px;">Failing Rule / Checker</th>
+              <th style="padding: 12px;">File & Line</th>
+              <th style="padding: 12px;">Defect Description</th>
+              <th style="padding: 12px;">Copilot Remediation Prompt</th>
+            </tr>
+          </thead>
+          <tbody id="coverity-table-body">
+            <tr><td colspan="6" class="loading-state" style="padding: 30px; text-align: center;"><div class="spinner"></div><p>Loading Coverity scan results...</p></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- Policy Repository & Rules Tab -->
+  <section class="tab-panel" id="tab-policy">
+    <div class="section-header" style="display: flex; justify-content: space-between; align-items: center;">
+      <div>
+        <h2>📜 Policy Repository & Copilot Conventions</h2>
+        <p>Developer corrections, preferred approaches, and architectural rules synchronized with .github/copilot-instructions.md</p>
+      </div>
+      <button class="btn-sync" onclick="openRememberRuleModal()" style="background: var(--accent-gradient);">+ Remember New Rule</button>
+    </div>
+
+    <div class="policy-container" style="display: grid; grid-template-columns: 1fr 340fr; gap: 20px;">
+      <div class="policy-main">
+        <div class="policy-filter-bar" style="margin-bottom: 16px; display: flex; gap: 10px;">
+          <button class="filter-btn active" onclick="filterRules('all', this)">All Rules</button>
+          <button class="filter-btn" onclick="filterRules('APPROVED', this)">Approved</button>
+          <button class="filter-btn" onclick="filterRules('PENDING', this)">Pending Review</button>
+          <button class="filter-btn" onclick="filterRules('REJECTED', this)">Rejected</button>
+        </div>
+        <div id="policy-rules-list" class="policy-rules-list">
+          <div class="loading-state"><div class="spinner"></div><p>Loading rules repository...</p></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Smart Tests & Diagnostics Distiller Tab -->
+  <section class="tab-panel" id="tab-smarttest">
+    <div class="section-header" style="display: flex; justify-content: space-between; align-items: center;">
+      <div>
+        <h2>🧪 Smart Test Selection & Trace Distiller</h2>
+        <p>AST & dependency-guided minimal test recommendation with 60–90% token reduction on test failure traces</p>
+      </div>
+      <button class="btn-sync" onclick="runRecommendedTestsUI()" style="background: linear-gradient(135deg, #10B981 0%, #059669 100%);">▶ Run Recommended Tests</button>
+    </div>
+
+    <div class="test-runner-container" style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+      <div class="test-recs-card card">
+        <h3 style="font-size: 15px; font-weight: 600; margin-bottom: 12px; color: var(--text-heading);">Minimal Recommended Test Set</h3>
+        <div id="test-recs-list">
+          <div class="loading-state"><div class="spinner"></div><p>Calculating minimal test set...</p></div>
+        </div>
+      </div>
+      <div class="test-distiller-card card">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+          <h3 style="font-size: 15px; font-weight: 600; color: var(--text-heading);">Distilled Failure Diagnostics</h3>
+          <span class="token-badge" id="token-savings-badge">0% Tokens Saved</span>
+        </div>
+        <pre id="distilled-trace-output" class="trace-box">Run tests to capture and distill output failure traces...</pre>
+      </div>
+    </div>
+  </section>
+
+  <!-- Health Tab -->
+  <section class="tab-panel" id="tab-health">
+    <div class="section-header">
+      <h2>🏥 File Health Scores</h2>
+      <p>Deterministic code quality scoring — lowest scored files need most attention</p>
+    </div>
+    <div class="health-grid" id="health-grid">
+      <div class="loading-state"><div class="spinner"></div><p>Scoring files...</p></div>
+    </div>
+  </section>
+
+  <!-- Dead Code Tab -->
+  <section class="tab-panel" id="tab-deadcode">
+    <div class="section-header">
+      <h2>🧹 Dead Code Candidates</h2>
+      <p>Functions and classes defined but never referenced — safe cleanup opportunities</p>
+    </div>
+    <div class="dead-code-list" id="dead-code-list">
+      <div class="loading-state"><div class="spinner"></div><p>Detecting unused symbols...</p></div>
+    </div>
+  </section>
+
+  <!-- Dependencies Tab -->
+  <section class="tab-panel" id="tab-dependencies">
+    <div class="section-header">
+      <h2>🔗 Dependency Intelligence</h2>
+      <p>Import graph — hub files, circular deps, orphans</p>
+    </div>
+    <div class="dep-stats-row" id="dep-stats-row">
+      <div class="loading-state"><div class="spinner"></div><p>Building graph...</p></div>
+    </div>
+    <div class="dep-grid" id="dep-grid"></div>
+  </section>
+
+  <!-- Co-Changes Tab -->
+  <section class="tab-panel" id="tab-cochange">
+    <div class="section-header">
+      <h2>🔄 Co-Change Pairs</h2>
+      <p>Files that always change together — hidden coupling even without explicit imports</p>
+    </div>
+    <div class="cochange-list" id="cochange-list">
+      <div class="loading-state"><div class="spinner"></div><p>Analyzing commit pairs...</p></div>
+    </div>
+  </section>
+
+  <!-- Blast Radius Tab -->
+  <section class="tab-panel" id="tab-blastradius">
+    <div class="section-header">
+      <h2>⚡ Blast Radius & Token Savings</h2>
+      <p>Minimal review context sets calculated for top hotspot files — reducing Copilot token waste by up to 100x</p>
+    </div>
+    <div class="blastradius-list" id="blastradius-list">
+      <div class="loading-state"><div class="spinner"></div><p>Calculating blast radius sets...</p></div>
+    </div>
+  </section>
+
+  <!-- Owners Tab -->
+  <section class="tab-panel" id="tab-owners">
+    <div class="section-header">
+      <h2>👥 Module Ownership</h2>
+      <p>Git-blame aggregated — bus factor = 1 means knowledge concentration risk</p>
+    </div>
+    <div class="owner-list" id="owner-list">
+      <div class="loading-state"><div class="spinner"></div><p>Analyzing ownership...</p></div>
+    </div>
+  </section>
+
+</main>
+
+<!-- ── Copilot Quick Prompts Footer Bar ──────────────────────────────────────── -->
+<div class="copilot-panel">
+  <div class="copilot-panel-header">
+    <svg viewBox="0 0 24 24" fill="currentColor" class="copilot-icon">
+      <path d="M23.922 16.992c-.861 1.495-5.859 5.023-11.922 5.023-6.063 0-11.061-3.528-11.922-5.023A.641.641 0 0 1 0 16.736v-2.869a.841.841 0 0 1 .053-.22c.372-.935 1.347-2.292 2.605-2.656.167-.429.414-1.055.644-1.517a10.195 10.195 0 0 1-.052-1.086c0-1.331.282-2.499 1.132-3.368.397-.406.89-.717 1.474-.952 1.399-1.136 3.392-2.093 6.122-2.093 2.731 0 4.767.957 6.166 2.093.584.235 1.077.546 1.474.952.85.869 1.132 2.037 1.132 3.368 0 .368-.014.733-.052 1.086.23.462.477 1.088.644 1.517 1.258.364 2.233 1.721 2.605 2.656a.832.832 0 0 1 .053.22v2.869a.641.641 0 0 1-.078.256Z"/>
+    </svg>
+    <span>Copilot Prompt Templates</span>
+  </div>
+  <div class="copilot-prompts">
+    <button class="prompt-chip" onclick="copyPrompt(this)" data-prompt="What are the top hotspots in this codebase and why are they risky?">🔥 Show hotspots</button>
+    <button class="prompt-chip" onclick="copyPrompt(this)" data-prompt="Calculate the blast radius and minimal review set for enatega-multivendor-app/src/screens/CreateAccount/useCreateAccount.android.js">⚡ Blast Radius & Token Savings</button>
+    <button class="prompt-chip" onclick="copyPrompt(this)" data-prompt="Generate a safe refactoring plan for the lowest-scored file in this codebase">🏥 Refactor plan</button>
+    <button class="prompt-chip" onclick="copyPrompt(this)" data-prompt="Find all dead code candidates and suggest which ones to remove first">🧹 Dead code cleanup</button>
+    <button class="prompt-chip" onclick="copyPrompt(this)" data-prompt="What are the co-change pairs with high coupling in this repo?">🔄 Show co-change pairs</button>
+    <button class="prompt-chip" onclick="copyPrompt(this)" data-prompt="Generate the copilot-instructions.md file for this repository">📋 Gen instructions</button>
+  </div>
+  <div class="copied-toast" id="copied-toast">Copied! Paste in Copilot Agent mode</div>
+</div>
+<!-- End of Copilot Panel (fixed at bottom) -->
+
+<!-- ── Footer ───────────────────────────────────────────────────────────────── -->
+<footer class="footer" style="padding: 16px 24px 80px; font-size: 11px; color: var(--text-muted); display: flex; justify-content: space-between;">
+  <span>CopilotLens · Codebase Intelligence via MCP</span>
+  <span id="last-updated">—</span>
+</footer>
+
+<script src="app.js"></script>
+</body>
+</html>
