@@ -105,9 +105,17 @@ Use these tools to:
 - Check who owns a module before suggesting changes
 - Find dead code that can be safely removed
 - Understand architectural dependencies before restructuring
+- Learn and enforce project-specific conventions via the policy system
 
-Always call get_file_health() before suggesting changes to a specific file.
-Always call get_hotspots() when asked about risky or problematic areas of the codebase.
+IMPORTANT WORKFLOW RULES:
+1. Always call get_file_health() before suggesting changes to a specific file.
+2. Always call get_hotspots() when asked about risky or problematic areas of the codebase.
+3. Always call get_copilot_context(file_path) at the start of any coding task to load approved project rules.
+4. When a developer says "Do not...", "Never...", "Always use...", "Remember this rule:", or corrects your output,
+   call analyze_copilot_interaction(interaction_text) to extract and save the rule.
+5. When a developer says "remember this rule" explicitly, call remember_rule() to store it immediately.
+6. Use get_project_rules() to list all stored conventions at any time.
+7. Use review_policy_rule(rule_id, action) to approve/reject/edit rules on developer request.
 """
 )
 
@@ -763,6 +771,319 @@ def run_coverity_scan() -> str:
         "status": "SUCCESS",
         "message": "Coverity rule scan completed and saved to coverity_findings.json",
         "summary": summary
+    }, indent=2)
+
+
+
+# ─── Copilot Interaction Learning & Policy MCP Tools ──────────────────────────
+
+@mcp.tool()
+def remember_rule(
+    rule: str,
+    preferred_approach: str = "",
+    scope: str = "project",
+    rationale: str = "",
+    auto_approve: bool = False
+) -> str:
+    """
+    Explicitly save a developer rule, correction, or project convention to the local policy repository.
+
+    Use this when a developer says things like:
+    - "Remember this rule: Do not update server.py directly"
+    - "Always use async/await in this project"
+    - "Never modify the generated files under /dist"
+
+    The rule is stored with PENDING status by default (requires developer approval via review_policy_rule),
+    unless auto_approve=True is set, in which case it is immediately added to copilot-instructions.md.
+
+    Args:
+        rule: The rule or convention text to remember (e.g. "Do not edit auto-generated files")
+        preferred_approach: The recommended alternative or approach (optional)
+        scope: Scope of the rule — a file path, module name, language, or 'project' (default: 'project')
+        rationale: Why this rule exists (optional but recommended)
+        auto_approve: If True, immediately approve and sync to copilot-instructions.md (default: False)
+    """
+    status = "APPROVED" if auto_approve else "PENDING"
+    new_rule = policy_repo.add_rule(
+        rule=rule,
+        preferred_approach=preferred_approach or rule,
+        scope=scope,
+        rationale=rationale or "Explicitly submitted by developer",
+        source_interaction="Copilot Agent / remember_rule command",
+        confidence_level="HIGH",
+        status=status
+    )
+    sync_msg = ""
+    if auto_approve:
+        sync_msg = policy_repo.sync_to_copilot_instructions()
+
+    return json.dumps({
+        "status": "SUCCESS",
+        "rule": new_rule,
+        "message": (
+            f"✅ Rule saved and APPROVED. {sync_msg}"
+            if auto_approve else
+            f"📋 Rule saved as PENDING. Use review_policy_rule(rule_id='{new_rule['id']}', action='approve') to activate it."
+        )
+    }, indent=2)
+
+
+@mcp.tool()
+def analyze_copilot_interaction(
+    interaction_text: str,
+    auto_approve_high_confidence: bool = False
+) -> str:
+    """
+    Analyze a Copilot chat interaction or developer correction and automatically extract
+    project rules, conventions, and engineering practices.
+
+    This tool identifies patterns like:
+    - Negative directives: "Do not...", "Don't...", "Never...", "Avoid..."
+    - Positive conventions: "Always use...", "Prefer...", "Must use..."
+    - Explicit rules: "Remember this rule: ...", "Rule: ..."
+
+    For each extracted rule it determines: rule text, preferred approach, scope,
+    rationale, and confidence level (HIGH/MEDIUM/LOW).
+
+    Extracted rules are stored as PENDING by default and must be reviewed by the developer
+    using review_policy_rule() unless auto_approve_high_confidence=True.
+
+    Args:
+        interaction_text: The raw interaction or developer message to analyze
+                          (e.g. "Do not update this file. Always use the factory pattern for services.")
+        auto_approve_high_confidence: If True, automatically approve HIGH confidence rules (default: False)
+    """
+    result = interaction_analyzer.analyze_interaction(
+        text=interaction_text,
+        auto_approve_high_confidence=auto_approve_high_confidence
+    )
+
+    if result["extracted_count"] == 0:
+        return json.dumps({
+            "status": "NO_RULES_FOUND",
+            "message": (
+                "No recognizable rules or conventions were detected in the text. "
+                "Try using explicit phrasing like 'Do not...', 'Always use...', or 'Remember this rule: ...'. "
+                "You can also call remember_rule() directly to save a rule manually."
+            ),
+            "source_text": interaction_text
+        }, indent=2)
+
+    pending = [r for r in result["rules"] if r["status"] == "PENDING"]
+    approved = [r for r in result["rules"] if r["status"] == "APPROVED"]
+
+    return json.dumps({
+        "status": "SUCCESS",
+        "extracted_count": result["extracted_count"],
+        "pending_rules": len(pending),
+        "auto_approved_rules": len(approved),
+        "rules": result["rules"],
+        "next_step": (
+            f"Review and approve {len(pending)} pending rule(s) using review_policy_rule(rule_id, action='approve'). "
+            "Approved rules will be synced to .github/copilot-instructions.md automatically."
+            if pending else
+            "All rules have been approved and synced to .github/copilot-instructions.md."
+        )
+    }, indent=2)
+
+
+@mcp.tool()
+def get_project_rules(status: str = "all", scope: str = "") -> str:
+    """
+    Retrieve all stored project rules and conventions from the local policy repository.
+
+    This is the primary tool Copilot should call at the start of any task to load
+    project-specific guidance, restrictions, and approved conventions before writing code.
+
+    Always call this before starting a significant coding task to respect team conventions.
+
+    Args:
+        status: Filter by rule status — 'all', 'APPROVED', 'PENDING', or 'REJECTED' (default: 'all')
+        scope: Optional scope filter — file path, module name, or language (e.g. 'python', 'server.py')
+               Leave empty to get all scopes including project-wide rules.
+    """
+    rules = policy_repo.list_rules(status_filter=status, scope_filter=scope)
+    approved = [r for r in rules if r.get("status") == "APPROVED"]
+    pending = [r for r in rules if r.get("status") == "PENDING"]
+    rejected = [r for r in rules if r.get("status") == "REJECTED"]
+
+    if not rules:
+        return json.dumps({
+            "status": "EMPTY",
+            "message": (
+                "No project rules stored yet. "
+                "Use analyze_copilot_interaction() to extract rules from interactions, "
+                "or remember_rule() to add rules explicitly."
+            ),
+            "rules": []
+        }, indent=2)
+
+    context_lines = []
+    for r in approved:
+        line = f"[{r['scope']}] {r['rule']}"
+        if r.get("preferred_approach") and r["preferred_approach"] != r["rule"]:
+            line += f" → Preferred: {r['preferred_approach']}"
+        context_lines.append(line)
+
+    return json.dumps({
+        "status": "SUCCESS",
+        "total": len(rules),
+        "approved": len(approved),
+        "pending_review": len(pending),
+        "rejected": len(rejected),
+        "scope_filter": scope or "all",
+        "rules": rules,
+        "copilot_context_summary": (
+            "📜 Active project rules Copilot must follow:\n" + "\n".join(f"  • {l}" for l in context_lines)
+            if context_lines else
+            "No approved rules yet. Pending rules need developer approval via review_policy_rule()."
+        )
+    }, indent=2)
+
+
+@mcp.tool()
+def review_policy_rule(
+    rule_id: str,
+    action: str,
+    preferred_approach: str = "",
+    scope: str = ""
+) -> str:
+    """
+    Review, approve, reject, edit, or delete a pending rule in the policy repository.
+
+    Developers must approve rules before they become active Copilot guidance.
+    Approved rules are automatically synced to .github/copilot-instructions.md.
+
+    Args:
+        rule_id: The rule ID to act on (from get_project_rules() or analyze_copilot_interaction())
+        action: One of 'approve', 'reject', 'edit', or 'delete'
+                - 'approve': Activates the rule and syncs to copilot-instructions.md
+                - 'reject': Marks rule as rejected (kept for audit trail)
+                - 'edit': Updates the preferred_approach and/or scope
+                - 'delete': Permanently removes the rule
+        preferred_approach: New preferred approach text (only used with action='edit')
+        scope: New scope override (only used with action='edit')
+    """
+    valid_actions = ("approve", "reject", "edit", "delete")
+    if action.lower() not in valid_actions:
+        return json.dumps({
+            "status": "ERROR",
+            "message": f"Invalid action '{action}'. Must be one of: {', '.join(valid_actions)}"
+        }, indent=2)
+
+    result = policy_repo.update_rule_status(
+        rule_id=rule_id,
+        action=action,
+        preferred_approach=preferred_approach,
+        scope=scope
+    )
+
+    if "error" in result:
+        return json.dumps({"status": "ERROR", "message": result["error"]}, indent=2)
+
+    action_messages = {
+        "approve": "✅ Rule APPROVED and synced to .github/copilot-instructions.md. Copilot will now follow this rule.",
+        "reject": "❌ Rule REJECTED. It will not be applied to Copilot guidance.",
+        "edit": "✏️ Rule UPDATED. Re-approve with action='approve' if you want changes to take effect.",
+        "delete": "🗑️ Rule DELETED permanently from the policy repository."
+    }
+
+    return json.dumps({
+        "status": "SUCCESS",
+        "action": action.upper(),
+        "rule": result,
+        "message": action_messages.get(action.lower(), "Action completed.")
+    }, indent=2)
+
+
+@mcp.tool()
+def get_copilot_context(file_path: str = "", task_description: str = "") -> str:
+    """
+    Get all relevant approved project rules and contextual guidance Copilot should follow
+    for a specific file or task. Call this at the start of any coding task.
+
+    This combines:
+    - All project-wide approved rules
+    - File/module-specific rules matching the given file_path
+    - Language-specific rules detected from the file extension
+    - A formatted context block ready to guide Copilot's behavior
+
+    Args:
+        file_path: The file Copilot is about to work on (e.g. 'mcp_server/server.py')
+                   Used to fetch file-specific and language-specific rules.
+        task_description: Brief description of what Copilot is about to do (optional, for logging)
+    """
+    # Collect project-wide approved rules
+    project_rules = policy_repo.get_approved_rules(scope="")
+
+    # Detect language from extension for language-scoped rules
+    lang_scope = ""
+    if file_path:
+        ext_map = {
+            ".py": "python", ".js": "javascript", ".ts": "typescript",
+            ".jsx": "javascript", ".tsx": "typescript", ".java": "java",
+            ".cs": "csharp", ".go": "go", ".rb": "ruby"
+        }
+        from pathlib import Path as _Path
+        ext = _Path(file_path).suffix.lower()
+        lang_scope = ext_map.get(ext, "")
+
+    # Collect file-specific rules
+    file_rules = []
+    lang_rules = []
+    seen_ids = set()
+    for r in project_rules:
+        scope = r.get("scope", "project")
+        if file_path and (file_path in scope or scope in file_path):
+            if r["id"] not in seen_ids:
+                file_rules.append(r)
+                seen_ids.add(r["id"])
+        elif lang_scope and lang_scope == scope.lower():
+            if r["id"] not in seen_ids:
+                lang_rules.append(r)
+                seen_ids.add(r["id"])
+
+    global_rules = [r for r in project_rules if r["id"] not in seen_ids and r.get("scope") == "project"]
+
+    # Build formatted guidance block
+    guidance_lines = ["## 📜 CopilotLens Project Rules — MUST FOLLOW\n"]
+
+    if file_rules:
+        guidance_lines.append(f"### File-Specific Rules for `{file_path}`:")
+        for r in file_rules:
+            guidance_lines.append(f"  🔴 {r['rule']}")
+            if r.get("preferred_approach") and r["preferred_approach"] != r["rule"]:
+                guidance_lines.append(f"     → Do this instead: {r['preferred_approach']}")
+
+    if lang_rules:
+        guidance_lines.append(f"\n### Language Rules ({lang_scope}):")
+        for r in lang_rules:
+            guidance_lines.append(f"  🟡 {r['rule']}")
+
+    if global_rules:
+        guidance_lines.append("\n### Project-Wide Rules:")
+        for r in global_rules:
+            guidance_lines.append(f"  🟢 {r['rule']}")
+
+    if not (file_rules or lang_rules or global_rules):
+        guidance_lines.append("  ℹ️ No approved rules yet. Use remember_rule() or analyze_copilot_interaction() to add rules.")
+
+    total = len(file_rules) + len(lang_rules) + len(global_rules)
+
+    return json.dumps({
+        "status": "SUCCESS",
+        "file": file_path or "project-wide",
+        "task": task_description,
+        "total_applicable_rules": total,
+        "file_specific_rules": len(file_rules),
+        "language_rules": len(lang_rules),
+        "project_rules": len(global_rules),
+        "copilot_guidance": "\n".join(guidance_lines),
+        "rules_detail": {
+            "file_specific": file_rules,
+            "language": lang_rules,
+            "project": global_rules
+        }
     }, indent=2)
 
 
