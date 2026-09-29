@@ -8,12 +8,12 @@ let scoreRingChart = null;
 let distChart = null;
 let dashboardData = null;
 
+let refreshTimer = null;
+
 // ── Bootstrap ──────────────────────────────────────────────────────────────────
 
 document.addEventListener("DOMContentLoaded", () => {
   loadData();
-  // Auto-refresh every 30 seconds
-  setInterval(loadData, 30000);
 });
 
 async function loadData() {
@@ -25,7 +25,7 @@ async function loadData() {
     if (dashboardData.status === "loading") {
       setStatus("loading");
       document.getElementById("score-interpretation").textContent = "⏳ Analyzing repository in background...";
-      setTimeout(loadData, 2000);
+      setTimeout(loadData, 3000);
       return;
     }
 
@@ -35,12 +35,19 @@ async function loadData() {
     if (lastEl) {
       lastEl.textContent = "Updated: " + new Date().toLocaleTimeString();
     }
+
+    // Schedule next refresh only after render finishes (every 60s)
+    if (refreshTimer) clearTimeout(refreshTimer);
+    refreshTimer = setTimeout(loadData, 60000);
   } catch (e) {
     setStatus("error");
     console.error("Failed to load data:", e);
     showError();
+    if (refreshTimer) clearTimeout(refreshTimer);
+    refreshTimer = setTimeout(loadData, 10000);
   }
 }
+
 
 function setStatus(state) {
   const dot = document.getElementById("status-dot");
@@ -674,7 +681,13 @@ function renderCytoscapeGraph(data) {
     const visNodes = [];
     const visEdges = [];
 
-    rawNodes.forEach(n => {
+    // In large enterprise repos (e.g. 4,700+ files), rendering 4,000+ physics nodes
+    // freezes the browser UI. Limit graph visualization to the top 250 hubs/hotspots/connected nodes.
+    const MAX_GRAPH_NODES = 250;
+    const prioritizedNodes = rawNodes.slice(0, MAX_GRAPH_NODES);
+    const visibleNodeIds = new Set(prioritizedNodes.map(n => n.id));
+
+    prioritizedNodes.forEach(n => {
       const isHot = hotspotPaths.has(n.id);
       const isCircular = n.is_circular || circularSet.has(n.id);
       const isHub = n.is_hub || n.imported_by_count >= 5;
@@ -717,14 +730,16 @@ function renderCytoscapeGraph(data) {
     });
 
     rawEdges.forEach(e => {
-      visEdges.push({
-        from: e.source,
-        to: e.target,
-        arrows: { to: { enabled: true, scaleFactor: 0.6 } },
-        color: { color: "rgba(100, 116, 139, 0.4)", highlight: "#68BDF6" },
-        width: 1.5,
-        smooth: { type: "continuous" }
-      });
+      if (visibleNodeIds.has(e.source) && visibleNodeIds.has(e.target)) {
+        visEdges.push({
+          from: e.source,
+          to: e.target,
+          arrows: { to: { enabled: true, scaleFactor: 0.6 } },
+          color: { color: "rgba(100, 116, 139, 0.4)", highlight: "#68BDF6" },
+          width: 1.5,
+          smooth: { type: "continuous" }
+        });
+      }
     });
 
     const graphData = {
@@ -737,19 +752,19 @@ function renderCytoscapeGraph(data) {
         shape: "dot",
         borderWidth: 2,
         borderWidthSelected: 4,
-        shadow: { enabled: true, color: "rgba(0,0,0,0.4)", size: 6 }
+        shadow: { enabled: false }
       },
       physics: {
         solver: "forceAtlas2Based",
         forceAtlas2Based: {
-          gravitationalConstant: -35,
-          centralGravity: 0.015,
-          springLength: 90,
+          gravitationalConstant: -25,
+          centralGravity: 0.02,
+          springLength: 80,
           springConstant: 0.08
         },
-        maxVelocity: 40,
-        minVelocity: 0.1,
-        stabilization: { iterations: 150 }
+        maxVelocity: 30,
+        minVelocity: 0.5,
+        stabilization: { iterations: 60, updateInterval: 25 }
       },
       interaction: {
         hover: true,
@@ -758,6 +773,7 @@ function renderCytoscapeGraph(data) {
         zoomView: true
       }
     };
+
 
     if (visNetworkInstance) {
       visNetworkInstance.destroy();

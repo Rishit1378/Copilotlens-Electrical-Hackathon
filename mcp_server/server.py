@@ -1432,8 +1432,8 @@ def get_dashboard_data() -> dict:
     global _DASHBOARD_CACHE, _DASHBOARD_LAST_RUN
     now = time.time()
     
-    # If cache is valid (within 120s), return it immediately
-    if _DASHBOARD_CACHE and (now - _DASHBOARD_LAST_RUN < 120):
+    # If cache is valid (within 300s / 5 minutes), return it immediately
+    if _DASHBOARD_CACHE and (now - _DASHBOARD_LAST_RUN < 300):
         return _DASHBOARD_CACHE
 
     # Trigger background analysis if cache is empty or stale
