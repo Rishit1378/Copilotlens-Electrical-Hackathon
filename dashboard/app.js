@@ -726,10 +726,29 @@ function renderCytoscapeGraph(data) {
 
       const sizeVal = Math.max(16, Math.min(36, 16 + (n.imported_by_count || 0) * 3));
 
+      // Vis-Network renders HTML safely and cleanly when passed a DOM element
+      const tooltipEl = document.createElement("div");
+      tooltipEl.style.padding = "8px 10px";
+      tooltipEl.style.fontSize = "12px";
+      tooltipEl.style.lineHeight = "1.5";
+      tooltipEl.style.color = "#E2E8F0";
+      tooltipEl.style.backgroundColor = "rgba(15, 23, 42, 0.95)";
+      tooltipEl.style.border = "1px solid rgba(148, 163, 184, 0.25)";
+      tooltipEl.style.borderRadius = "8px";
+      tooltipEl.style.boxShadow = "0 8px 24px rgba(0, 0, 0, 0.4)";
+      tooltipEl.style.fontFamily = "var(--font-mono, monospace)";
+      tooltipEl.innerHTML = `
+        <div style="font-weight:700;color:#38BDF8;font-size:12px;margin-bottom:4px;word-break:break-all;">${escapeHtml(n.id)}</div>
+        <div style="display:flex;justify-content:space-between;gap:12px;"><span style="color:#94A3B8;">Type:</span><b style="color:#F1F5F9;">${nodeType}</b></div>
+        <div style="display:flex;justify-content:space-between;gap:12px;"><span style="color:#94A3B8;">Imported By:</span><b style="color:#F1F5F9;">${n.imported_by_count ?? 0}</b></div>
+        <div style="display:flex;justify-content:space-between;gap:12px;"><span style="color:#94A3B8;">Imports:</span><b style="color:#F1F5F9;">${n.imports_count ?? 0}</b></div>
+        <div style="display:flex;justify-content:space-between;gap:12px;"><span style="color:#94A3B8;">Centrality:</span><b style="color:#F1F5F9;">${n.centrality ?? 0}</b></div>
+      `;
+
       visNodes.push({
         id: n.id,
         label: n.label || n.id.split('/').pop(),
-        title: `<b>${n.id}</b><br/>Type: ${nodeType}<br/>Imported By: ${n.imported_by_count}<br/>Imports: ${n.imports_count}`,
+        title: tooltipEl,
         value: sizeVal,
         size: sizeVal,
         color: {
@@ -788,12 +807,11 @@ function renderCytoscapeGraph(data) {
       },
       interaction: {
         hover: true,
-        tooltipDelay: 150,
+        tooltipDelay: 100,
         dragNodes: true,
         zoomView: true
       }
     };
-
 
     if (visNetworkInstance) {
       visNetworkInstance.destroy();
@@ -801,11 +819,28 @@ function renderCytoscapeGraph(data) {
 
     visNetworkInstance = new vis.Network(container, graphData, options);
 
-    visNetworkInstance.on("selectNode", function(params) {
-      const selectedId = params.nodes[0];
+    const handleNodeSelection = (selectedId) => {
+      if (!selectedId) {
+        resetSidebar();
+        return;
+      }
       const selectedNode = visNodes.find(n => n.id === selectedId);
       if (selectedNode) {
         updateNodeSidebar(selectedNode.raw, data);
+      }
+    };
+
+    visNetworkInstance.on("click", function(params) {
+      if (params.nodes && params.nodes.length > 0) {
+        handleNodeSelection(params.nodes[0]);
+      } else {
+        resetSidebar();
+      }
+    });
+
+    visNetworkInstance.on("selectNode", function(params) {
+      if (params.nodes && params.nodes.length > 0) {
+        handleNodeSelection(params.nodes[0]);
       }
     });
 
@@ -843,40 +878,55 @@ function highlightBlastRadius(node) {
 }
 
 function updateNodeSidebar(nodeData, globalData) {
+  if (!nodeData) return;
   const title = document.getElementById("node-detail-title");
   const sub = document.getElementById("node-detail-sub");
   const body = document.getElementById("node-detail-body");
 
-  if (title) title.textContent = nodeData.id;
-  if (sub) sub.textContent = `Centrality: ${nodeData.centrality} · In-Degree: ${nodeData.imported_by} · Out-Degree: ${nodeData.imports}`;
+  const nodeId = nodeData.id || "Unknown Module";
+  const inDegree = nodeData.imported_by_count ?? nodeData.imported_by ?? 0;
+  const outDegree = nodeData.imports_count ?? nodeData.imports ?? 0;
+  const centrality = nodeData.centrality ?? 0;
 
-  const blastData = (globalData.blast_radius || []).find(b => (b.targets || []).includes(nodeData.id));
-  const bd = blastData?.blast_radius_breakdown || {};
-  const dependents = bd.direct_dependents || [];
+  if (title) title.textContent = nodeId;
+  if (sub) sub.textContent = `Centrality: ${centrality} · In-Degree: ${inDegree} · Out-Degree: ${outDegree}`;
+
+  // Find direct dependents: first from blast_radius if available, else derive from dependency edges
+  let dependents = [];
+  const blastData = (globalData?.blast_radius || []).find(b => (b.targets || []).some(t => t === nodeId || nodeId.endsWith(t) || t.endsWith(nodeId)));
+  if (blastData?.blast_radius_breakdown?.direct_dependents) {
+    dependents = blastData.blast_radius_breakdown.direct_dependents;
+  } else if (globalData?.dependency_graph?.edges) {
+    dependents = globalData.dependency_graph.edges
+      .filter(e => e.target === nodeId)
+      .map(e => e.source);
+  }
+
+  const isHub = Boolean(nodeData.is_hub || inDegree >= 5);
 
   if (body) {
     body.innerHTML = `
       <div class="node-stat-card">
         <div class="node-stat-row">
           <span class="node-stat-label">File Type</span>
-          <span class="node-stat-val">${nodeData.is_hub ? '🟡 Hub Module' : '🟢 Component'}</span>
+          <span class="node-stat-val">${isHub ? '🟡 Hub Module' : '🟢 Component'}</span>
         </div>
         <div class="node-stat-row">
           <span class="node-stat-label">Imported By</span>
-          <span class="node-stat-val">${nodeData.imported_by} modules</span>
+          <span class="node-stat-val">${inDegree} modules</span>
         </div>
         <div class="node-stat-row">
           <span class="node-stat-label">Imports</span>
-          <span class="node-stat-val">${nodeData.imports} modules</span>
+          <span class="node-stat-val">${outDegree} modules</span>
         </div>
         <div class="node-stat-row">
           <span class="node-stat-label">Blast Radius</span>
           <span class="node-stat-val" style="color:var(--accent-cyan)">${dependents.length} direct dependents</span>
         </div>
       </div>
-      <div style="font-size:12px;font-weight:600;margin-bottom:8px;color:var(--text-primary)">Direct Dependents:</div>
+      <div style="font-size:12px;font-weight:600;margin-bottom:8px;color:var(--text-primary)">Direct Dependents (${dependents.length}):</div>
       <div style="font-size:11px;color:var(--text-secondary);max-height:140px;overflow-y:auto">
-        ${dependents.length ? dependents.map(d => `<div style="padding:4px 0;border-bottom:1px solid var(--border-subtle)">${d}</div>`).join('') : '<div style="color:var(--text-muted)">No dependents — safe to refactor isolately</div>'}
+        ${dependents.length ? dependents.map(d => `<div style="padding:4px 0;border-bottom:1px solid var(--border-subtle);word-break:break-all;">${escapeHtml(d)}</div>`).join('') : '<div style="color:var(--text-muted)">No dependents — safe to refactor isolately</div>'}
       </div>
     `;
   }
@@ -893,6 +943,20 @@ function resetSidebar() {
 }
 
 function searchGraphNode(query) {
+  if (visNetworkInstance) {
+    if (!query) {
+      visNetworkInstance.unselectAll();
+      resetSidebar();
+      return;
+    }
+    const match = dashboardData?.dependency_graph?.nodes?.find(n => n.id.toLowerCase().includes(query.toLowerCase()));
+    if (match) {
+      visNetworkInstance.selectNodes([match.id]);
+      visNetworkInstance.focus(match.id, { scale: 1.2, animation: true });
+      updateNodeSidebar(match, dashboardData);
+    }
+    return;
+  }
   if (!cyInstance) return;
   if (!query) {
     cyInstance.elements().removeClass('faded highlighted');
@@ -909,12 +973,24 @@ function changeGraphLayout(layoutName) {
 }
 
 function resetGraphView() {
+  if (visNetworkInstance) {
+    visNetworkInstance.fit({ animation: { duration: 500 } });
+    visNetworkInstance.unselectAll();
+    resetSidebar();
+    return;
+  }
   if (!cyInstance) return;
   cyInstance.elements().removeClass('faded highlighted');
   cyInstance.fit();
 }
 
 function toggleHubsOnly() {
+  if (visNetworkInstance && dashboardData?.dependency_graph?.nodes) {
+    const hubs = dashboardData.dependency_graph.nodes.filter(n => n.is_hub || (n.imported_by_count || 0) >= 3);
+    const hubIds = hubs.map(h => h.id);
+    visNetworkInstance.selectNodes(hubIds);
+    return;
+  }
   if (!cyInstance) return;
   const hubs = cyInstance.nodes().filter(n => n.data('is_hub') || n.data('imported_by') >= 3);
   cyInstance.elements().addClass('faded').removeClass('highlighted');
