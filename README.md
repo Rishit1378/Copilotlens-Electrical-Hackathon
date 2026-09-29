@@ -70,16 +70,16 @@ Configure the MCP server in your IDE Copilot configuration (`~/.config/github-co
 
 ---
 
-## 🛠️ MCP Tools Overview (79 Active Tools)
+## 🛠️ MCP Tools Overview (81 Active Tools)
 
-CopilotLens provides **79 MCP tools** organized into modular domain suites:
+CopilotLens provides **81 MCP tools** organized into modular domain suites:
 
 | Domain / Category | Tool Count | Core Capabilities & Key Tools |
 | :--- | :---: | :--- |
 | **IntelliJ PSI Engine** | 9 | `psi_get_class_structure`, `psi_get_call_graph`, `psi_find_usages`, `psi_get_type_hierarchy`, `psi_symbol_search`, `psi_get_file_inspections`, `psi_health_check` |
 | **Neo4j Code Graph** | 27 | `neo4j_find_class`, `neo4j_get_class_hierarchy`, `neo4j_expand_both`, `neo4j_get_related_tests`, `neo4j_pagerank`, `neo4j_run_cypher`, `neo4j_graph_intelligence` |
 | **Coverity SAST Security** | 4 | `get_coverity_findings`, `get_coverity_summary`, `import_coverity_json`, `run_coverity_scan` |
-| **Capital Logic (CLogic) & DRC** | 4 | `analyze_xml_design`, `generate_logic_action`, `validate_design_drc`, `inspect_live_clogic_session` |
+| **Capital Logic (CLogic) & DRC** | 6 | `analyze_xml_design`, `generate_logic_action` (plan), `generate_logic_action_changeset` (build diffs), `apply_logic_action_changeset` (apply & test), `validate_design_drc`, `inspect_live_clogic_session` |
 | **Atlassian & Context Scraper** | 10 | `scrape_extended_context`, `get_cached_context`, `get_jira_issues_for_file`, `create_jira_issue`, `get_confluence_page`, `annotate_pr`, `get_recent_prs` |
 | **Code Health, Git & Hotspots** | 6 | `get_file_health`, `get_codebase_summary`, `get_hotspots`, `get_co_change_pairs`, `get_module_owners`, `get_why` |
 | **AST Dead Code & Dependencies** | 5 | `get_dead_code`, `get_dependency_graph`, `get_file_dependencies`, `get_named_imports`, `get_blast_radius` |
@@ -92,7 +92,7 @@ CopilotLens provides **79 MCP tools** organized into modular domain suites:
 
 ## 📄 Documentation
 
-- [FEATURES.md](FEATURES.md) — Comprehensive technical feature breakdown & 79 MCP tools catalog.
+- [FEATURES.md](FEATURES.md) — Comprehensive technical feature breakdown & 81 MCP tools catalog.
 - [setup.md](setup.md) — Step-by-step installation and environment configuration guide.
 - [docs/atlassian_setup.md](docs/atlassian_setup.md) — Jira, Confluence, and Bitbucket connection guide.
 - [docs/coverity_setup.md](docs/coverity_setup.md) — Coverity SAST JSON export and integration guide.

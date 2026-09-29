@@ -18,7 +18,7 @@
 11. [Smart Test Recommendation & Test Log Distiller](#11-smart-test-recommendation--test-log-distiller)
 12. [Policy Repository & Copilot Conventions Continuous Sync](#12-policy-repository--copilot-conventions-continuous-sync)
 13. [Interactive Visual Dashboards](#13-interactive-visual-dashboards)
-14. [Complete MCP Tools Reference (79 Active Tools)](#14-complete-mcp-tools-reference-79-active-tools)
+14. [Complete MCP Tools Reference (81 Active Tools)](#14-complete-mcp-tools-reference-81-active-tools)
 15. [Quick Start & Setup Guide](#15-quick-start--setup-guide)
 
 ---
@@ -94,17 +94,22 @@ Integrates **Coverity Static Application Security Testing (SAST)** rule checks i
 ## 4. Capital Logic (CLogic) & DRC Validator
 
 ### Overview
-Domain-specific analysis engine for Siemens Capital Logic (CLogic) electrical harness designs and Caplet plugins.
+Domain-specific analysis engine for Siemens Capital Logic (CLogic) electrical harness designs and Caplet plugins. Includes the full **Logic Action Change Set** lifecycle engine (`logic_action_generator.py`) to plan, generate, and safely apply end-to-end Caplet Actions without guessing product decisions.
 
 ### Key Capabilities
 - **Capital XML Analyzer**: Parses Capital XML design schemas, devices, connectors, pins, nets, and properties.
-- **Caplet Logic Action Generator**: Scaffolds complete Java Caplet Action classes, XML plugin descriptor declarations, and JUnit test fixtures.
+- **3-Step Logic Action Change Set Workflow**:
+  1. `generate_logic_action(action_name, target_object, package_name, spec_json)`: **PLAN** — Scans the Capital repository for sibling actions, `LogicController` registrations, `LogicResource` menus/toolbars, ribbon groups, and bundles. Identifies and asks the developer every undecided product decision (action type, selection, mutation, menu, gating).
+  2. `generate_logic_action_changeset(spec_json)`: **BUILD DIFFS** — Builds the complete change set in memory (Action + ActionUI + JUnit 3 test, `LogicController` registration, `LogicResource` menu/toolbar wiring, resource bundle `.properties` keys, `ribbon.xml` button, and icon checks). Returns unified diffs and a `changeset_id` without touching disk.
+  3. `apply_logic_action_changeset(changeset_id, run_build)`: **APPLY & TEST** — Applies the verified change set, rolling back automatically on failure. Optionally runs configured build and targeted test commands (`$CAPITAL_BUILD_CMD`, `$CAPITAL_TEST_CMD`).
 - **Design Rule Check (DRC) Validator**: Runs heuristic design checks (unconnected pins, floating nets, missing wire gauges, duplicate component designators).
 - **Live CLogic Session Inspector**: Inspects active CLogic / CManager runtime sessions and real-time design mutations.
 
 ### Exposed MCP Tools
 - `analyze_xml_design(xml_input, detail)`: Full structural breakdown of a Capital XML design file.
-- `generate_logic_action(action_name, target_object, package_name)`: Scaffolds Caplet Java code, XML configuration, and JUnit tests.
+- `generate_logic_action(action_name, target_object, package_name, spec_json)`: Step 1: Plan a new Logic action with repository discovery and developer questions.
+- `generate_logic_action_changeset(spec_json)`: Step 2: Build the full in-memory Logic Action Change Set with unified diffs.
+- `apply_logic_action_changeset(changeset_id, run_build)`: Step 3: Apply the reviewed change set to disk with rollback protection and optional test run.
 - `validate_design_drc(xml_input)`: Runs heuristic Capital Design Rule Checks.
 - `inspect_live_clogic_session(target_xml_or_session)`: Inspects live or snapshot CLogic electrical session state.
 
@@ -267,7 +272,7 @@ CopilotLens includes built-in visual web dashboards served locally at **http://l
 
 ---
 
-## 14. Complete MCP Tools Reference (79 Active Tools)
+## 14. Complete MCP Tools Reference (81 Active Tools)
 
 | Tool Name | Domain | Description |
 | :--- | :--- | :--- |
@@ -312,7 +317,9 @@ CopilotLens includes built-in visual web dashboards served locally at **http://l
 | `import_coverity_json` | Coverity SAST | Import Coverity CLI JSON export (`cov-format-errors`) |
 | `run_coverity_scan` | Coverity SAST | Run static rule scan and save to `coverity_findings.json` |
 | `analyze_xml_design` | CLogic / DRC | Analyze a Capital XML design file or scenario |
-| `generate_logic_action` | CLogic / DRC | Scaffold a Java Caplet Action, XML config & JUnit test |
+| `generate_logic_action` | CLogic / DRC | Step 1: Plan a Logic action with repository discovery and developer questions |
+| `generate_logic_action_changeset` | CLogic / DRC | Step 2: Build the full in-memory Logic Action Change Set with unified diffs |
+| `apply_logic_action_changeset` | CLogic / DRC | Step 3: Apply reviewed change set to disk with rollback protection and optional test run |
 | `validate_design_drc` | CLogic / DRC | Run heuristic Capital Design Rule Checks |
 | `inspect_live_clogic_session` | CLogic / DRC | Inspect live CLogic/CManager session state |
 | `scrape_extended_context` | Context Scraper | Scrape Jira, Confluence & PRs with BM25 ranking to SQLite |

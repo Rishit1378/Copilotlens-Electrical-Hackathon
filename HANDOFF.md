@@ -77,11 +77,11 @@ c:\CoPilotLens\
 19. `AnalysisCache` (`cache.py`): Incremental `.copilotlens_cache.json` caching.
 20. `Atlassian Integrations` (`jira.py`, `confluence.py`, `bitbucket.py`): Enterprise REST clients for Data Center/Server and Cloud.
 
-### Active MCP Tools (79 total defined in `mcp_server/server.py`)
+### Active MCP Tools (81 total defined in `mcp_server/server.py`)
 - **IntelliJ PSI Engine (9)**: `psi_health_check`, `psi_get_class_structure`, `psi_get_method_body`, `psi_find_usages`, `psi_get_call_graph`, `psi_explore_class_dependencies`, `psi_get_type_hierarchy`, `psi_symbol_search`, `psi_get_file_inspections`
 - **Neo4j Code Graph (27)**: `neo4j_find_class`, `neo4j_get_class`, `neo4j_get_interface`, `neo4j_get_class_methods`, `neo4j_get_test_class`, `neo4j_find_by_filepath`, `neo4j_expand_out`, `neo4j_expand_in`, `neo4j_expand_both`, `neo4j_get_class_hierarchy`, `neo4j_get_related_tests`, `neo4j_expand_test_out`, `neo4j_expand_test_in`, `neo4j_expand_test_both`, `neo4j_get_uncovered_methods`, `neo4j_get_test_infrastructure`, `neo4j_find_similar_tested_classes`, `neo4j_get_package_coverage`, `neo4j_graph_intelligence`, `neo4j_pagerank`, `neo4j_betweenness`, `neo4j_run_cypher`, `neo4j_filter_by_field`, `neo4j_filter_by_annotation`, `neo4j_search_methods`, `neo4j_lookup_enum`, `neo4j_lookup_nested_classes`
 - **Coverity SAST (4)**: `get_coverity_findings`, `get_coverity_summary`, `import_coverity_json`, `run_coverity_scan`
-- **Capital Logic & DRC (4)**: `analyze_xml_design`, `generate_logic_action`, `validate_design_drc`, `inspect_live_clogic_session`
+- **Capital Logic & DRC (6)**: `analyze_xml_design`, `generate_logic_action`, `generate_logic_action_changeset`, `apply_logic_action_changeset`, `validate_design_drc`, `inspect_live_clogic_session`
 - **Context Scraper & Atlassian (10)**: `scrape_extended_context`, `get_cached_context`, `get_jira_issues_for_file`, `create_jira_issue`, `update_jira_issue`, `get_confluence_page`, `update_confluence_page`, `get_pr_context`, `annotate_pr`, `get_recent_prs`
 - **Code Health & Git (6)**: `get_file_health`, `get_codebase_summary`, `get_hotspots`, `get_co_change_pairs`, `get_module_owners`, `get_why`
 - **Dead Code & Dependencies (5)**: `get_dead_code`, `get_dependency_graph`, `get_file_dependencies`, `get_named_imports`, `get_blast_radius`

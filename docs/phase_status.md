@@ -150,9 +150,9 @@ Update this after completing each phase or sub-task.
 ### Completed Tasks
 - [x] Create `xml_analyzer.py` for Capital XML designs & scenarios
 - [x] Create `drc_validator.py` for Capital Design Rule Checks
-- [x] Create `logic_action_generator.py` for Caplet Action Java code generation
+- [x] Create `logic_action_generator.py` for full 3-step Logic Action Change Set workflow (Plan -> Generate Changeset -> Apply & Test)
 - [x] Create `clogic_session_analyzer.py` for live session monitoring
-- [x] Add 4 MCP tools: `analyze_xml_design`, `generate_logic_action`, `validate_design_drc`, `inspect_live_clogic_session`
+- [x] Add 6 MCP tools: `analyze_xml_design`, `generate_logic_action`, `generate_logic_action_changeset`, `apply_logic_action_changeset`, `validate_design_drc`, `inspect_live_clogic_session`
 
 ---
 
