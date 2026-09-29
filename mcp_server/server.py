@@ -1313,96 +1313,153 @@ def get_copilot_context(file_path: str = "", task_description: str = "") -> str:
 
 # ─── Dashboard HTTP Server ─────────────────────────────────────────────────────
 
+_DASHBOARD_CACHE: Dict[str, Any] = {}
+_DASHBOARD_LAST_RUN: float = 0.0
+_DASHBOARD_LOCK = threading.Lock()
+_DASHBOARD_IS_ANALYZING = False
+
+
+def _refresh_dashboard_data_async():
+    """Background worker that computes heavy codebase metrics without blocking HTTP requests."""
+    global _DASHBOARD_CACHE, _DASHBOARD_LAST_RUN, _DASHBOARD_IS_ANALYZING
+    with _DASHBOARD_LOCK:
+        if _DASHBOARD_IS_ANALYZING:
+            return
+        _DASHBOARD_IS_ANALYZING = True
+
+    def _worker():
+        global _DASHBOARD_CACHE, _DASHBOARD_LAST_RUN, _DASHBOARD_IS_ANALYZING
+        try:
+            health = health_scorer.get_summary()
+        except Exception:
+            health = {"avg_score": 0, "distribution": {}, "worst_files": [], "best_files": []}
+
+        try:
+            hotspots = git_analyzer.get_hotspots(15)
+        except Exception:
+            hotspots = []
+
+        try:
+            dead = ast_dead_code_detector.find_dead_code(limit_files=500)
+        except Exception:
+            dead = []
+
+        try:
+            graph = dep_analyzer.build_graph()
+        except Exception:
+            graph = {"nodes": [], "edges": [], "circular_dependencies": [], "orphan_files": []}
+
+        try:
+            repo_summary = git_analyzer.get_repo_summary()
+        except Exception:
+            repo_summary = {}
+
+        try:
+            rules = policy_repo.list_rules()
+        except Exception:
+            rules = []
+
+        try:
+            kg = knowledge_graph.build_graph()
+        except Exception:
+            kg = {"nodes": [], "edges": [], "node_count": 0, "edge_count": 0}
+
+        try:
+            test_recs = smart_test_analyzer.recommend_tests(["mcp_server/server.py"])
+        except Exception:
+            test_recs = {"minimal_test_set": []}
+
+        try:
+            coverity_summary = coverity_analyzer.get_summary()
+        except Exception:
+            coverity_summary = {"total_defects": 0, "rule_compliance_score": 100, "by_severity": {}, "by_checker": {}, "affected_files_count": 0, "findings": []}
+
+        try:
+            module_owners = git_analyzer.get_module_owners()
+        except Exception:
+            module_owners = []
+
+        try:
+            co_changes = git_analyzer.get_co_change_pairs()
+        except Exception:
+            co_changes = []
+
+        try:
+            blast_data = []
+            target_sample = []
+            for pair in co_changes[:3]:
+                target_sample.append(pair["file_a"])
+            for h in hotspots[:3]:
+                if h.get("path") and h["path"] not in target_sample:
+                    target_sample.append(h["path"])
+            for target_path in target_sample[:5]:
+                blast_data.append(blast_analyzer.calculate_blast_radius(target_path))
+        except Exception:
+            blast_data = []
+
+        with _DASHBOARD_LOCK:
+            _DASHBOARD_CACHE = {
+                "status": "ready",
+                "repo_path": REPO_PATH,
+                "health": health,
+                "hotspots": hotspots,
+                "dead_code": dead,
+                "policy_rules": rules,
+                "knowledge_graph": kg,
+                "test_recommendations": test_recs,
+                "coverity": coverity_summary,
+                "module_owners": module_owners,
+                "co_change_pairs": co_changes,
+                "blast_radius": blast_data,
+                "dependency_graph": {
+                    "nodes": graph["nodes"],
+                    "edges": graph["edges"],
+                    "circular": graph.get("circular_dependencies", []),
+                    "orphans": graph.get("orphan_files", [])
+                },
+                "repo_summary": repo_summary
+            }
+            _DASHBOARD_LAST_RUN = time.time()
+            _DASHBOARD_IS_ANALYZING = False
+
+    t = threading.Thread(target=_worker, daemon=True)
+    t.start()
+
+
 def get_dashboard_data() -> dict:
-    """Collect all analysis data for the dashboard."""
-    try:
-        health = health_scorer.get_summary()
-    except Exception:
-        health = {"avg_score": 0, "distribution": {}, "worst_files": [], "best_files": []}
+    """Collect all analysis data for the dashboard with non-blocking cache return."""
+    global _DASHBOARD_CACHE, _DASHBOARD_LAST_RUN
+    now = time.time()
     
-    try:
-        hotspots = git_analyzer.get_hotspots(15)
-    except Exception:
-        hotspots = []
-    
-    try:
-        dead = ast_dead_code_detector.find_dead_code()
-    except Exception:
-        dead = []
-    
-    try:
-        graph = dep_analyzer.build_graph()
-    except Exception:
-        graph = {"nodes": [], "edges": [], "circular_dependencies": [], "orphan_files": []}
-    
-    try:
-        repo_summary = git_analyzer.get_repo_summary()
-    except Exception:
-        repo_summary = {}
+    # If cache is valid (within 120s), return it immediately
+    if _DASHBOARD_CACHE and (now - _DASHBOARD_LAST_RUN < 120):
+        return _DASHBOARD_CACHE
 
-    try:
-        rules = policy_repo.list_rules()
-    except Exception:
-        rules = []
+    # Trigger background analysis if cache is empty or stale
+    _refresh_dashboard_data_async()
 
-    try:
-        kg = knowledge_graph.build_graph()
-    except Exception:
-        kg = {"nodes": [], "edges": [], "node_count": 0, "edge_count": 0}
+    # If cache exists (even slightly stale), return it while refreshing
+    if _DASHBOARD_CACHE:
+        return _DASHBOARD_CACHE
 
-    try:
-        test_recs = smart_test_analyzer.recommend_tests(["mcp_server/server.py"])
-    except Exception:
-        test_recs = {"minimal_test_set": []}
-
-    try:
-        coverity_summary = coverity_analyzer.get_summary()
-    except Exception:
-        coverity_summary = {"total_defects": 0, "rule_compliance_score": 100, "by_severity": {}, "by_checker": {}, "affected_files_count": 0, "findings": []}
-
-    try:
-        module_owners = git_analyzer.get_module_owners()
-    except Exception:
-        module_owners = []
-
-    try:
-        co_changes = git_analyzer.get_co_change_pairs()
-    except Exception:
-        co_changes = []
-
-    try:
-        blast_data = []
-        target_sample = []
-        for pair in co_changes[:3]:
-            target_sample.append(pair["file_a"])
-        for h in hotspots[:3]:
-            if h.get("path") and h["path"] not in target_sample:
-                target_sample.append(h["path"])
-        for target_path in target_sample[:5]:
-            blast_data.append(blast_analyzer.calculate_blast_radius(target_path))
-    except Exception:
-        blast_data = []
-
+    # First load placeholder so the browser gets an immediate HTTP 200 response
     return {
+        "status": "loading",
         "repo_path": REPO_PATH,
-        "health": health,
-        "hotspots": hotspots,
-        "dead_code": dead,
-        "policy_rules": rules,
-        "knowledge_graph": kg,
-        "test_recommendations": test_recs,
-        "coverity": coverity_summary,
-        "module_owners": module_owners,
-        "co_change_pairs": co_changes,
-        "blast_radius": blast_data,
-        "dependency_graph": {
-            "nodes": graph["nodes"],
-            "edges": graph["edges"],
-            "circular": graph.get("circular_dependencies", []),
-            "orphans": graph.get("orphan_files", [])
-        },
-        "repo_summary": repo_summary
+        "health": {"avg_score": 0, "distribution": {}, "worst_files": [], "best_files": []},
+        "hotspots": [],
+        "dead_code": [],
+        "policy_rules": [],
+        "knowledge_graph": {"nodes": [], "edges": [], "node_count": 0, "edge_count": 0},
+        "test_recommendations": {"minimal_test_set": []},
+        "coverity": {"total_defects": 0, "rule_compliance_score": 100, "by_severity": {}, "by_checker": {}, "affected_files_count": 0, "findings": []},
+        "module_owners": [],
+        "co_change_pairs": [],
+        "blast_radius": [],
+        "dependency_graph": {"nodes": [], "edges": [], "circular": [], "orphans": []},
+        "repo_summary": {}
     }
+
 
 
 class DashboardHandler(BaseHTTPRequestHandler):
@@ -1480,13 +1537,16 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self._send_json(200, result)
         elif self.path == "/api/data":
             data = get_dashboard_data()
-            body = json.dumps(data).encode()
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.send_header("Content-Length", len(body))
-            self.end_headers()
-            self.wfile.write(body)
+            body = json.dumps(data).encode("utf-8")
+            try:
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.send_header("Content-Length", len(body))
+                self.end_headers()
+                self.wfile.write(body)
+            except (ConnectionResetError, ConnectionAbortedError, BrokenPipeError):
+                pass
         elif self.path == "/api/sync-instructions":
             result = generate_copilot_instructions()
             body = result.encode("utf-8")
@@ -1536,7 +1596,13 @@ class DashboardHandler(BaseHTTPRequestHandler):
 def start_dashboard():
     """Start the dashboard HTTP server in a background thread."""
     try:
-        server = HTTPServer(("localhost", DASHBOARD_PORT), DashboardHandler)
+        from http.server import ThreadingHTTPServer
+        ServerClass = ThreadingHTTPServer
+    except Exception:
+        ServerClass = HTTPServer
+
+    try:
+        server = ServerClass(("0.0.0.0", DASHBOARD_PORT), DashboardHandler)
         print(f"[CopilotLens] Dashboard: http://localhost:{DASHBOARD_PORT}", file=sys.stderr, flush=True)
         server.serve_forever()
     except OSError as e:
