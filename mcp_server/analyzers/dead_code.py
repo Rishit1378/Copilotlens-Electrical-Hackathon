@@ -8,6 +8,7 @@ import os
 import re
 from pathlib import Path
 from collections import defaultdict
+from typing import Optional
 
 
 SKIP_DIRS = {
@@ -52,17 +53,20 @@ class DeadCodeDetector:
     def __init__(self, repo_path: str):
         self.repo_path = Path(repo_path).resolve()
 
-    def find_dead_code(self, limit: int = 200) -> list:
+    def find_dead_code(self, limit: Optional[int] = None) -> list:
         """
-        Returns a list of potentially unused symbols.
+        Returns a list of potentially unused symbols across the repository.
         Each item: {symbol, defined_in, type, confidence}
         """
         # Step 1: Collect all definitions
         definitions = {}  # symbol -> {file, type, line}
+        count = 0
 
         for root, dirs, files in os.walk(self.repo_path):
             dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
-            for fname in files[:limit]:
+            for fname in files:
+                if limit is not None and limit > 0 and count >= limit:
+                    break
                 fpath = Path(root) / fname
                 ext = fpath.suffix.lower()
                 if ext not in DEFINITION_PATTERNS:
@@ -74,6 +78,7 @@ class DeadCodeDetector:
                 except Exception:
                     continue
 
+                count += 1
                 for pattern in DEFINITION_PATTERNS[ext]:
                     for match in pattern.finditer(content):
                         # Get the first non-None group
@@ -115,19 +120,19 @@ class DeadCodeDetector:
 
         # Sort by confidence then name
         dead_candidates.sort(key=lambda x: (x["confidence"] == "MEDIUM", x["symbol"]))
-        return dead_candidates[:50]
+        return dead_candidates
 
-    def _collect_all_content(self, max_files: int = 300) -> str:
-        """Read source files into one string for reference counting. Capped for large repos."""
+    def _collect_all_content(self, max_files: Optional[int] = None) -> str:
+        """Read source files into one string for reference counting across the whole repo."""
         parts = []
         extensions = set(DEFINITION_PATTERNS.keys())
         count = 0
         for root, dirs, files in os.walk(self.repo_path):
-            if count >= max_files:
+            if max_files is not None and max_files > 0 and count >= max_files:
                 break
             dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
             for fname in files:
-                if count >= max_files:
+                if max_files is not None and max_files > 0 and count >= max_files:
                     break
                 fpath = Path(root) / fname
                 if fpath.suffix.lower() in extensions:

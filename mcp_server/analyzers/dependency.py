@@ -65,7 +65,7 @@ class DependencyAnalyzer:
         self._graph = None
         self._symbol_map = {}  # symbol -> list of files that define it
 
-    def build_graph(self, limit: int = 300) -> dict:
+    def build_graph(self, limit: Optional[int] = None) -> dict:
         """
         Build the dependency graph. Returns:
         {
@@ -86,7 +86,7 @@ class DependencyAnalyzer:
         for root, dirs, files in os.walk(self.repo_path):
             dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
             for fname in files:
-                if count >= limit:
+                if limit is not None and limit > 0 and count >= limit:
                     break
                 fpath = Path(root) / fname
                 ext = fpath.suffix.lower()
@@ -163,10 +163,10 @@ class DependencyAnalyzer:
         nodes.sort(key=lambda x: (x["imported_by_count"], x["centrality"]), reverse=True)
 
         self._graph = {
-            "nodes": nodes[:200],
-            "edges": resolved_edges[:500],
-            "circular_dependencies": circular[:20],
-            "orphan_files": orphans[:30],
+            "nodes": nodes if (limit is not None and limit > 0) else nodes,
+            "edges": resolved_edges if (limit is not None and limit > 0) else resolved_edges,
+            "circular_dependencies": circular,
+            "orphan_files": orphans,
             "total_files": len(all_files),
             "total_edges": len(resolved_edges),
             "graphify_engine": "tree-sitter/graphify" if graphify_active else "ast-graphify-hybrid"

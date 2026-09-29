@@ -50,6 +50,22 @@ from analyzers.policy_repo import PolicyRepository, CopilotInteractionAnalyzer
 from analyzers.smart_test_analyzer import SmartTestAnalyzer
 from analyzers.codebase_graph import CodebaseKnowledgeGraph
 from analyzers.coverity_analyzer import CoverityAnalyzer
+from analyzers.neo4j_analyzer import Neo4jAnalyzer
+from analyzers.xml_analyzer import XmlAnalyzer
+from analyzers.logic_action_generator import LogicActionGenerator
+from analyzers.drc_validator import DrcValidator
+from analyzers.clogic_session_analyzer import CLogicSessionAnalyzer
+from analyzers.context_scraper import ContextScraper
+from analyzers.psi_analyzer import PsiToolsAnalyzer
+
+# Atlassian Integrations
+try:
+    from integrations.atlassian.jira import jira_manager
+    from integrations.atlassian.confluence import confluence_manager
+    from integrations.atlassian.bitbucket import bitbucket_manager
+    ATLASSIAN_AVAILABLE = True
+except Exception:
+    ATLASSIAN_AVAILABLE = False
 
 # ─── Argument Parsing ──────────────────────────────────────────────────────────
 
@@ -91,6 +107,14 @@ interaction_analyzer = CopilotInteractionAnalyzer(REPO_PATH)
 smart_test_analyzer = SmartTestAnalyzer(REPO_PATH)
 knowledge_graph = CodebaseKnowledgeGraph(REPO_PATH)
 coverity_analyzer = CoverityAnalyzer(REPO_PATH)
+neo4j_analyzer = Neo4jAnalyzer()
+xml_analyzer = XmlAnalyzer(REPO_PATH, search_engine=search_engine)
+action_generator = LogicActionGenerator(REPO_PATH)
+drc_validator = DrcValidator(REPO_PATH)
+clogic_session_analyzer = CLogicSessionAnalyzer(REPO_PATH, xml_analyzer=xml_analyzer, drc_validator=drc_validator)
+clogic_session_analyzer.start_monitoring()
+context_scraper = ContextScraper(REPO_PATH)
+psi_analyzer = PsiToolsAnalyzer()
 
 # ─── MCP Server ────────────────────────────────────────────────────────────────
 
@@ -103,9 +127,13 @@ Use these tools to:
 - Understand code health BEFORE suggesting refactors
 - Identify risky/hotspot files that need extra care
 - Check who owns a module before suggesting changes
-- Find dead code that can be safely removed
+- Find dead code that can be safely removed (AST-level verification)
 - Understand architectural dependencies before restructuring
 - Learn and enforce project-specific conventions via the policy system
+- Navigate the Capital Neo4j code graph or IntelliJ PSI semantic tree to find relevant classes and call graphs
+- Query Capital Logic (CLogic) live design sessions, DRC rule checks, and XML actions
+- Scrape extensive cross-platform context across Jira tickets, Confluence pages, and Bitbucket PRs
+- Leverage native IntelliJ PSI tools (port 3000/3001) for class structure, call graphs, usages, and inspections
 
 IMPORTANT WORKFLOW RULES:
 1. Always call get_file_health() before suggesting changes to a specific file.
@@ -116,6 +144,10 @@ IMPORTANT WORKFLOW RULES:
 5. When a developer says "remember this rule" explicitly, call remember_rule() to store it immediately.
 6. Use get_project_rules() to list all stored conventions at any time.
 7. Use review_policy_rule(rule_id, action) to approve/reject/edit rules on developer request.
+8. When asked about class relationships, dependencies, or architectural context for Java code,
+   use psi_get_class_structure(), psi_find_usages(), or psi_get_call_graph() for real-time IDE fidelity, or neo4j_find_class() / neo4j_expand_both().
+9. When inspecting CLogic sessions or Capital XML designs, use get_clogic_session_status() and validate_drc_rule().
+10. When extensive background context is needed, call scrape_enterprise_context(keyword).
 """
 )
 
@@ -623,6 +655,244 @@ def query_codebase_graph(target: str, max_depth: int = 2) -> str:
         max_depth: Maximum relationship hop depth (default: 2)
     """
     res = knowledge_graph.query_graph(target, max_depth=max_depth)
+    return json.dumps(res, indent=2)
+
+
+# ─── Atlassian MCP Tools ───────────────────────────────────────────────────────
+
+@mcp.tool()
+def get_jira_issues_for_file(file_path: str) -> str:
+    """
+    Search Jira for open defects, bugs, or tasks linked to a specific source file.
+
+    Args:
+        file_path: Relative path to the file (e.g., 'src/service/UserService.java')
+    """
+    if not ATLASSIAN_AVAILABLE:
+        return json.dumps({"error": "Atlassian integration modules not available."})
+    res = jira_manager.get_issues_for_file(file_path)
+    return json.dumps(res, indent=2)
+
+
+@mcp.tool()
+def create_jira_issue(summary: str, description: str, issue_type: str = "Bug") -> str:
+    """
+    Create a new Jira issue (Bug, Task, etc.) directly from CoPilotLens findings.
+
+    Args:
+        summary: Short title of the issue
+        description: Detailed explanation, code snippet, or steps to reproduce
+        issue_type: Type of issue ('Bug', 'Task', 'Improvement', default is 'Bug')
+    """
+    if not ATLASSIAN_AVAILABLE:
+        return json.dumps({"error": "Atlassian integration modules not available."})
+    res = jira_manager.create_issue(summary, description, issue_type)
+    return json.dumps(res, indent=2)
+
+
+@mcp.tool()
+def update_jira_issue(issue_key: str, append_description: str = None, new_summary: str = None) -> str:
+    """
+    Update an existing Jira issue by appending text to its description or changing its summary.
+
+    Args:
+        issue_key: The issue key (e.g. 'PVC-4464')
+        append_description: Optional text to append to the existing issue description
+        new_summary: Optional new summary/title for the issue
+    """
+    if not ATLASSIAN_AVAILABLE:
+        return json.dumps({"error": "Atlassian integration modules not available."})
+    res = jira_manager.update_issue(issue_key, summary=new_summary, append_description=append_description)
+    return json.dumps(res, indent=2)
+
+
+@mcp.tool()
+def get_confluence_page(topic: str) -> str:
+    """
+    Retrieve architecture, design, or health documentation from Confluence.
+
+    Args:
+        topic: Topic, title, or search terms to look up in Confluence
+    """
+    if not ATLASSIAN_AVAILABLE:
+        return json.dumps({"error": "Atlassian integration modules not available."})
+    res = confluence_manager.get_page(topic)
+    return json.dumps(res, indent=2)
+
+
+@mcp.tool()
+def update_confluence_page(title_or_id: str, prepend_html: str = None, append_html: str = None) -> str:
+    """
+    Edit an existing Confluence page by prepending or appending text/HTML content.
+
+    Args:
+        title_or_id: Title or page ID of the Confluence page to edit
+        prepend_html: Text/HTML content to add to the TOP of the page
+        append_html: Text/HTML content to add to the BOTTOM of the page
+    """
+    if not ATLASSIAN_AVAILABLE:
+        return json.dumps({"error": "Atlassian integration modules not available."})
+    res = confluence_manager.update_page(title_or_id, prepend_html=prepend_html, append_html=append_html)
+    return json.dumps(res, indent=2)
+
+
+@mcp.tool()
+def get_pr_context(pr_id: str) -> str:
+    """
+    Fetch Pull Request metadata from Bitbucket (modified files, author, target branch).
+
+    Args:
+        pr_id: Pull Request ID or key (e.g. '42')
+    """
+    if not ATLASSIAN_AVAILABLE:
+        return json.dumps({"error": "Atlassian integration modules not available."})
+    res = bitbucket_manager.get_pr_context(pr_id)
+    return json.dumps(res, indent=2)
+
+
+@mcp.tool()
+def annotate_pr(pr_id: str, comment_markdown: str) -> str:
+    """
+    Post a review comment or code health analysis to a Bitbucket Pull Request.
+
+    Args:
+        pr_id: Pull Request ID or key (e.g. '42')
+        comment_markdown: Markdown formatted feedback or review analysis
+    """
+    if not ATLASSIAN_AVAILABLE:
+        return json.dumps({"error": "Atlassian integration modules not available."})
+    res = bitbucket_manager.annotate_pr(pr_id, comment_markdown)
+    return json.dumps(res, indent=2)
+
+
+@mcp.tool()
+def get_recent_prs(limit: int = 5) -> str:
+    """
+    Fetch recent Pull Requests from Bitbucket and return their details and summaries.
+
+    Args:
+        limit: Number of recent PRs to retrieve (default is 5)
+    """
+    if not ATLASSIAN_AVAILABLE:
+        return json.dumps({"error": "Atlassian integration modules not available."})
+    res = bitbucket_manager.get_recent_prs(limit=limit)
+    return json.dumps(res, indent=2)
+
+
+@mcp.tool()
+def scrape_extended_context(
+    topic: str,
+    max_jira: int = 10,
+    max_confluence: int = 10,
+    max_bitbucket: int = 10,
+    min_relevance: float = 0.5
+) -> str:
+    """
+    Scrapes comprehensive cross-system context across Jira, Confluence, and Bitbucket for a given keyword or topic.
+    Applies BM25 semantic relevance ranking to filter out incidental keyword matches and retain genuine domain context.
+    All extracted tickets, design pages, and pull requests are persisted into a local SQLite database for reuse.
+    Returns a structured Markdown report followed by structured JSON for Copilot prompt and context injection.
+
+    Args:
+        topic: The concept, class name, feature, or keyword to investigate (e.g. 'HarnessAssembly', 'OVERBRAIDCHILD', 'Multicore')
+        max_jira: Maximum number of relevant Jira issues to return (default: 10)
+        max_confluence: Maximum number of relevant Confluence design pages to return (default: 10)
+        max_bitbucket: Maximum number of relevant Bitbucket PRs to return (default: 10)
+        min_relevance: Minimum BM25 semantic relevance score threshold (default: 0.5)
+    """
+    if not ATLASSIAN_AVAILABLE:
+        return json.dumps({"error": "Atlassian integration modules not available. Check your .env file."})
+    res = context_scraper.scrape_and_index_context(
+        topic=topic,
+        max_jira=max_jira,
+        max_confluence=max_confluence,
+        max_bitbucket=max_bitbucket,
+        min_relevance_threshold=min_relevance
+    )
+    markdown = res.pop("context_markdown", "")
+    return f"{markdown}\n\n---\n## Structured Context Data (JSON)\n```json\n{json.dumps(res, indent=1)}\n```"
+
+
+@mcp.tool()
+def get_cached_context(topic: str, limit: int = 30) -> str:
+    """
+    Retrieve previously scraped and indexed Atlassian context items (Jira, Confluence, Bitbucket)
+    from the local SQLite knowledge database without making new remote API calls.
+
+    Args:
+        topic: Topic or keyword to retrieve cached context for
+        limit: Maximum number of cached items to return (default: 30)
+    """
+    items = context_scraper.db.get_context_for_topic(topic, limit=limit)
+    stats = context_scraper.db.get_stats()
+    return json.dumps({"topic": topic, "count": len(items), "db_stats": stats, "items": items}, indent=2)
+
+
+# ─── Capital / CLogic Tools ───────────────────────────────────────────────────
+
+@mcp.tool()
+def analyze_xml_design(xml_input: str, detail: str = "summary") -> str:
+    """
+    Analyze a Capital XML file or raw XML string and return its complete structured report:
+    document metadata and tag inventory; object instances, attributes, containment, and ID references;
+    logical-design snapshots (hierarchy trees) and paired before/after changes; related source files;
+    evidence-based scenario interpretations; and conditional object/scenario ideas with downstream uses.
+    The response starts with a human-readable Markdown report — present it to the user in full,
+    followed by any extra detail from the JSON. Treat the XML as serialized state, distinguish
+    filename-derived hypotheses from confirmed contents, and do not invent details not in the report.
+
+    Args:
+        xml_input: Absolute/relative XML file path or raw XML string
+        detail: "summary" (default, compact) or "full" (every instance, attribute and reference)
+    """
+    res = xml_analyzer.analyze_xml(xml_input, detail=detail)
+    if res.get("error"):
+        return json.dumps(res, indent=2)
+    markdown = res.pop("report_markdown")
+    return markdown + "\n\n---\n## Structured data (JSON)\n```json\n" + json.dumps(res, indent=1) + "\n```"
+
+
+@mcp.tool()
+def generate_logic_action(action_name: str, target_object: str = "DEVICE_CONNECTOR", package_name: str = "chs.caplets.logic.actions") -> str:
+    """
+    Generate production-ready Java Caplet Action boilerplate (subclassing AbstractAction),
+    XML action configuration snippet, and JUnit component test scaffold for Capital Logic.
+
+    Args:
+        action_name: Name of the action (e.g., 'RemoveLibPartAction')
+        target_object: Target domain object type (e.g. 'DEVICE_CONNECTOR', 'BACKSHELL', 'MULTICORE')
+        package_name: Target Java package name (default is 'chs.caplets.logic.actions')
+    """
+    res = action_generator.generate_action(action_name, target_object, package_name)
+    return json.dumps(res, indent=2)
+
+
+@mcp.tool()
+def validate_design_drc(xml_input: str) -> str:
+    """
+    Run Capital Design Rule Checks (DRC) on a design XML payload or file.
+    Validates cavity seals, dangling bundles, multicore path consistency, and splice separation.
+
+    Args:
+        xml_input: Path to design XML file or inline XML string
+    """
+    res = drc_validator.validate_drc(xml_input)
+    return json.dumps(res, indent=2)
+
+
+@mcp.tool()
+def inspect_live_clogic_session(target_xml_or_session: str = None) -> str:
+    """
+    Inspect the latest CLogic design XML state and changes captured by the background workspace/log poller.
+    Reports placed objects, observed add/change/remove events, next-step suggestions, and a QA reproduction checklist.
+    Monitoring begins with the MCP server. Configure CLOGIC_SESSION_DIR / CLOGIC_SESSION_XML and
+    CLOGIC_LOG_PATH / CMANAGER_LOG_PATH if the local installation uses different paths. DRC output is a
+    CopilotLens heuristic preflight, not a native Capital DRC execution.
+
+    Args:
+        target_xml_or_session: Optional XML path or inline XML for one-off analysis; omit it for polled live state.
+    """
+    res = clogic_session_analyzer.inspect_live_session(target_xml_or_session)
     return json.dumps(res, indent=2)
 
 
@@ -1136,20 +1406,46 @@ def get_dashboard_data() -> dict:
     except Exception:
         coverity_summary = {"total_defects": 0, "rule_compliance_score": 100, "by_severity": {}, "by_checker": {}, "affected_files_count": 0, "findings": []}
 
+    try:
+        module_owners = git_analyzer.get_module_owners()
+    except Exception:
+        module_owners = []
+
+    try:
+        co_changes = git_analyzer.get_co_change_pairs()
+    except Exception:
+        co_changes = []
+
+    try:
+        blast_data = []
+        target_sample = []
+        for pair in co_changes[:3]:
+            target_sample.append(pair["file_a"])
+        for h in hotspots[:3]:
+            if h.get("path") and h["path"] not in target_sample:
+                target_sample.append(h["path"])
+        for target_path in target_sample[:5]:
+            blast_data.append(blast_analyzer.calculate_blast_radius(target_path))
+    except Exception:
+        blast_data = []
+
     return {
         "repo_path": REPO_PATH,
         "health": health,
         "hotspots": hotspots,
-        "dead_code": dead[:30],
+        "dead_code": dead,
         "policy_rules": rules,
         "knowledge_graph": kg,
         "test_recommendations": test_recs,
         "coverity": coverity_summary,
+        "module_owners": module_owners,
+        "co_change_pairs": co_changes,
+        "blast_radius": blast_data,
         "dependency_graph": {
-            "nodes": graph["nodes"][:50],
-            "edges": graph["edges"][:100],
+            "nodes": graph["nodes"],
+            "edges": graph["edges"],
             "circular": graph.get("circular_dependencies", []),
-            "orphans": graph.get("orphan_files", [])[:10]
+            "orphans": graph.get("orphan_files", [])
         },
         "repo_summary": repo_summary
     }
@@ -1216,7 +1512,19 @@ class DashboardHandler(BaseHTTPRequestHandler):
         next_out_dir = Path(__file__).parent.parent / "dashboard-next" / "out"
         dashboard_dir = next_out_dir if next_out_dir.exists() else (Path(__file__).parent.parent / "dashboard")
 
-        if self.path == "/api/data":
+        if self.path.startswith("/api/neo4j"):
+            from urllib.parse import urlparse, parse_qs
+            parsed = urlparse(self.path)
+            qs = parse_qs(parsed.query)
+            action = qs.get("action", ["find_by_name"])[0]
+            args_raw = qs.get("args", ["{}"])[0]
+            try:
+                args = json.loads(args_raw)
+            except Exception:
+                args = {}
+            result = neo4j_analyzer._run(action, args)
+            self._send_json(200, result)
+        elif self.path == "/api/data":
             data = get_dashboard_data()
             body = json.dumps(data).encode()
             self.send_response(200)
@@ -1297,6 +1605,489 @@ def _interpret_summary(health: dict) -> str:
         return f"⚠️ Codebase health is fair ({avg}/100). {critical}/{total} files are in critical state."
     else:
         return f"🚨 Codebase health is poor ({avg}/100). Major refactoring recommended. {critical}/{total} files critical."
+
+
+# ─── Neo4j Code Graph Tools ────────────────────────────────────────────────────
+
+@mcp.tool()
+def neo4j_find_class(name: str, node_type: str = "any", max_results: int = 10) -> str:
+    """
+    Search the Neo4j Capital code graph for a class, interface, or test class by name.
+    Always start here before running any graph traversal.
+
+    Args:
+        name: Partial or full class name to search for.
+        node_type: Filter by 'Class', 'Interface', 'TestClass', or 'any' (default).
+        max_results: Maximum number of results to return (default 10).
+    """
+    return json.dumps(neo4j_analyzer.find_by_name(name, node_type, max_results), indent=2)
+
+
+@mcp.tool()
+def neo4j_get_class(class_name: str) -> str:
+    """
+    Get full details of a Java class node from the Neo4j code graph,
+    including its methods, fields, constructors, and annotations.
+
+    Args:
+        class_name: Simple name, fullName, or filePath fragment of the class.
+    """
+    return json.dumps(neo4j_analyzer.get_class_full(class_name), indent=2)
+
+
+@mcp.tool()
+def neo4j_get_interface(interface_name: str) -> str:
+    """
+    Get full details of a Java interface node from the Neo4j code graph,
+    including its method signatures.
+
+    Args:
+        interface_name: Simple name, fullName, or filePath fragment of the interface.
+    """
+    return json.dumps(neo4j_analyzer.get_interface_full(interface_name), indent=2)
+
+
+@mcp.tool()
+def neo4j_get_class_methods(class_name: str, include_private: bool = False, limit: int = 50) -> str:
+    """
+    List all method signatures of a Java class or interface from the code graph.
+    Use this to find coverage gaps or locate specific behaviour.
+
+    Args:
+        class_name: Target class name.
+        include_private: Include private methods (default False).
+        limit: Max number of methods to return (default 50).
+    """
+    return json.dumps(neo4j_analyzer.get_class_methods(class_name, include_private, limit), indent=2)
+
+
+@mcp.tool()
+def neo4j_get_test_class(class_name: str) -> str:
+    """
+    Resolve a TestClass node from the code graph and list its test methods.
+    Works with both the test class name and the production class name.
+
+    Args:
+        class_name: Test class name or production class name.
+    """
+    return json.dumps(neo4j_analyzer.get_test_class(class_name), indent=2)
+
+
+@mcp.tool()
+def neo4j_find_by_filepath(file_path: str, max_results: int = 10) -> str:
+    """
+    Find Class, Interface, or TestClass nodes in the code graph by file path fragment.
+
+    Args:
+        file_path: Case-insensitive file path substring (e.g. 'harness/assembly').
+        max_results: Maximum number of results (default 10).
+    """
+    return json.dumps(neo4j_analyzer.find_by_filepath(file_path, max_results), indent=2)
+
+
+@mcp.tool()
+def neo4j_expand_out(class_name: str, depth: int = 1) -> str:
+    """
+    Outbound graph traversal — find all classes and interfaces that the target class
+    depends on (i.e. what it uses or references). Returns filePath for each node.
+
+    Args:
+        class_name: Starting class name.
+        depth: Traversal depth (default 1, max recommended 3).
+    """
+    return json.dumps(neo4j_analyzer.expand_class_out(class_name, depth), indent=2)
+
+
+@mcp.tool()
+def neo4j_expand_in(class_name: str, depth: int = 1) -> str:
+    """
+    Inbound graph traversal — find all classes that depend on (call or import)
+    the target class. Returns filePath for each node.
+
+    Args:
+        class_name: Starting class name.
+        depth: Traversal depth (default 1, max recommended 3).
+    """
+    return json.dumps(neo4j_analyzer.expand_class_in(class_name, depth), indent=2)
+
+
+@mcp.tool()
+def neo4j_expand_both(class_name: str, depth: int = 1) -> str:
+    """
+    Bidirectional graph traversal — get the full dependency neighbourhood of a class.
+    Combines inbound and outbound in one call. Returns filePath for each node.
+    Use the result as seeds for neo4j_graph_intelligence() to rank by importance.
+
+    Args:
+        class_name: Starting class name.
+        depth: Traversal depth (default 1, max recommended 3).
+    """
+    return json.dumps(neo4j_analyzer.expand_both(class_name, depth), indent=2)
+
+
+@mcp.tool()
+def neo4j_get_class_hierarchy(class_name: str) -> str:
+    """
+    Get the full inheritance and interface implementation chain for a Java class.
+
+    Args:
+        class_name: Target class name.
+    """
+    return json.dumps(neo4j_analyzer.get_class_hierarchy(class_name), indent=2)
+
+
+@mcp.tool()
+def neo4j_get_related_tests(class_name: str, max_results: int = 10) -> str:
+    """
+    Find TestClass nodes related to a production class by name or path match.
+
+    Args:
+        class_name: Production class name.
+        max_results: Maximum number of test classes to return (default 10).
+    """
+    return json.dumps(neo4j_analyzer.get_related_test_classes(class_name, max_results), indent=2)
+
+
+@mcp.tool()
+def neo4j_expand_test_out(class_name: str, depth: int = 1) -> str:
+    """
+    Outbound traversal of TestClass nodes — find base test classes and shared fixtures.
+
+    Args:
+        class_name: Test class name.
+        depth: Traversal depth (default 1).
+    """
+    return json.dumps(neo4j_analyzer.expand_test_class_out(class_name, depth), indent=2)
+
+
+@mcp.tool()
+def neo4j_expand_test_in(class_name: str, depth: int = 1) -> str:
+    """
+    Inbound traversal of TestClass nodes — find subclass test nodes.
+
+    Args:
+        class_name: Test class name.
+        depth: Traversal depth (default 1).
+    """
+    return json.dumps(neo4j_analyzer.expand_test_class_in(class_name, depth), indent=2)
+
+
+@mcp.tool()
+def neo4j_expand_test_both(class_name: str, depth: int = 1) -> str:
+    """
+    Bidirectional traversal of TestClass nodes — full test neighbourhood.
+
+    Args:
+        class_name: Test class name.
+        depth: Traversal depth (default 1).
+    """
+    return json.dumps(neo4j_analyzer.expand_test_class_both(class_name, depth), indent=2)
+
+
+@mcp.tool()
+def neo4j_get_uncovered_methods(class_name: str) -> str:
+    """
+    Find public and protected methods of a class that have no test coverage.
+    Use this before writing new tests to identify gaps.
+
+    Args:
+        class_name: Target class name.
+    """
+    return json.dumps(neo4j_analyzer.get_uncovered_methods(class_name), indent=2)
+
+
+@mcp.tool()
+def neo4j_get_test_infrastructure(package_name: str) -> str:
+    """
+    Find base and abstract test classes with setup methods in a Java package.
+    Use this to find test patterns and infrastructure to reference.
+
+    Args:
+        package_name: Java package name (e.g. 'com.example.harness').
+    """
+    return json.dumps(neo4j_analyzer.get_test_infrastructure(package_name), indent=2)
+
+
+@mcp.tool()
+def neo4j_find_similar_tested_classes(class_name: str) -> str:
+    """
+    Find sibling classes in the same package that already have tests.
+    Useful for finding test patterns to reference when writing new tests.
+
+    Args:
+        class_name: Target class name.
+    """
+    return json.dumps(neo4j_analyzer.find_similar_tested_classes(class_name), indent=2)
+
+
+@mcp.tool()
+def neo4j_get_package_coverage(package_name: str) -> str:
+    """
+    Get test coverage status for every class in a Java package.
+
+    Args:
+        package_name: Java package name (e.g. 'com.example.harness').
+    """
+    return json.dumps(neo4j_analyzer.get_package_test_coverage(package_name), indent=2)
+
+
+@mcp.tool()
+def neo4j_graph_intelligence(class_names: str) -> str:
+    """
+    Rank a list of classes by combined PageRank + betweenness centrality score.
+    Use this AFTER traversal (neo4j_expand_both) to identify the most architecturally
+    important files to pass to Copilot as context.
+
+    Args:
+        class_names: Comma-separated list of class names to rank
+                     (e.g. 'HarnessAssembly,WireHarness,IHarnessProvider').
+    """
+    names = [n.strip() for n in class_names.split(",") if n.strip()]
+    return json.dumps(neo4j_analyzer.run_graph_intelligence(names), indent=2)
+
+
+@mcp.tool()
+def neo4j_pagerank(class_names: str) -> str:
+    """
+    Rank a list of classes by PageRank score [0-10].
+    Measures architectural influence (how many classes reference each node).
+
+    Args:
+        class_names: Comma-separated list of class names to rank.
+    """
+    names = [n.strip() for n in class_names.split(",") if n.strip()]
+    return json.dumps(neo4j_analyzer.run_pagerank(names), indent=2)
+
+
+@mcp.tool()
+def neo4j_betweenness(class_names: str) -> str:
+    """
+    Rank a list of classes by betweenness centrality score [0-10].
+    Measures structural centrality (how many paths pass through each node).
+
+    Args:
+        class_names: Comma-separated list of class names to rank.
+    """
+    names = [n.strip() for n in class_names.split(",") if n.strip()]
+    return json.dumps(neo4j_analyzer.run_betweenness(names), indent=2)
+
+
+@mcp.tool()
+def neo4j_run_cypher(query: str, params_json: str = "{}") -> str:
+    """
+    Run any parameterized Cypher query directly against the Neo4j code graph.
+    Use for custom lookups not covered by other tools.
+
+    Args:
+        query: Parameterized Cypher query string.
+        params_json: JSON string of query parameters (default '{}').
+    """
+    try:
+        params = json.loads(params_json)
+    except json.JSONDecodeError:
+        params = {}
+    return json.dumps(neo4j_analyzer.run_cypher(query, params), indent=2)
+
+
+@mcp.tool()
+def neo4j_filter_by_field(field_type: str) -> str:
+    """
+    Find all classes in the code graph that have a field of a given type.
+
+    Args:
+        field_type: Java field type name (e.g. 'HarnessProvider').
+    """
+    return json.dumps(neo4j_analyzer.dynamic_field_filter(field_type), indent=2)
+
+
+@mcp.tool()
+def neo4j_filter_by_annotation(annotation_type: str) -> str:
+    """
+    Find all classes in the code graph carrying a specific Java annotation.
+
+    Args:
+        annotation_type: Annotation name (e.g. 'SpringBootTest', 'Service').
+    """
+    return json.dumps(neo4j_analyzer.dynamic_annotation_filter(annotation_type), indent=2)
+
+
+@mcp.tool()
+def neo4j_search_methods(
+    method_name: str = "",
+    return_type: str = "",
+    signature_fragment: str = "",
+) -> str:
+    """
+    Find methods in the code graph by name, return type, or signature fragment.
+    At least one argument must be provided.
+
+    Args:
+        method_name: Partial method name to match.
+        return_type: Return type to filter by (e.g. 'List', 'void').
+        signature_fragment: Fragment of the full method signature.
+    """
+    return json.dumps(
+        neo4j_analyzer.dynamic_method_signature_search(
+            method_name=method_name or None,
+            return_type=return_type or None,
+            signature_fragment=signature_fragment or None,
+        ),
+        indent=2,
+    )
+
+
+@mcp.tool()
+def neo4j_lookup_enum(enum_name: str) -> str:
+    """
+    Resolve an Enum node from the code graph and return all its constants.
+
+    Args:
+        enum_name: Enum class name.
+    """
+    return json.dumps(neo4j_analyzer.dynamic_enum_lookup(enum_name), indent=2)
+
+
+@mcp.tool()
+def neo4j_lookup_nested_classes(parent_class_name: str) -> str:
+    """
+    Find all inner or nested classes of a parent Java class in the code graph.
+
+    Args:
+        parent_class_name: Parent class name.
+    """
+    return json.dumps(neo4j_analyzer.dynamic_nested_class_lookup(parent_class_name), indent=2)
+
+
+# ─── PSI Tools (IntelliJ Native Semantic Engine) ───────────────────────────────
+
+@mcp.tool()
+def psi_health_check() -> str:
+    """
+    Check the connectivity and status of the IntelliJ PSI Tools plugin server (port 3000/3001)
+    or CLI runner. Verifies whether IntelliJ IDEA is actively serving semantic PSI actions.
+    """
+    return json.dumps(psi_analyzer.health(), indent=2)
+
+
+@mcp.tool()
+def psi_get_class_structure(class_name: str) -> str:
+    """
+    Inspect the full structure of a Java class using IntelliJ PSI:
+    fields, methods, constructors, inner classes, superclasses, and interfaces.
+
+    Args:
+        class_name: Fully qualified or simple class name (e.g. 'com.mentor.capital.Rule' or 'Rule').
+    """
+    return json.dumps(psi_analyzer.get_class_structure(class_name), indent=2)
+
+
+@mcp.tool()
+def psi_get_method_body(method: str) -> str:
+    """
+    Extract the source code body and signature of a specific method using IntelliJ PSI.
+
+    Args:
+        method: Qualified method reference, e.g. 'ClassName#methodName' or 'com.pkg.ClassName#methodName'.
+    """
+    return json.dumps(psi_analyzer.get_method_body(method), indent=2)
+
+
+@mcp.tool()
+def psi_find_usages(symbol: str, scope: str = "project", include_hierarchy: bool = True) -> str:
+    """
+    Find all references / usages of a Java class, method, or field across the project using IntelliJ PSI.
+
+    Args:
+        symbol: Symbol identifier or qualified name to search usages for.
+        scope: Search scope ('project', 'module', or 'all'). Default is 'project'.
+        include_hierarchy: Whether to include usages in sub/super types. Default is True.
+    """
+    return json.dumps(psi_analyzer.find_usages(symbol, scope=scope, include_hierarchy=include_hierarchy), indent=2)
+
+
+@mcp.tool()
+def psi_get_call_graph(method: str, direction: str = "both", depth: int = 2, max_nodes: int = 50) -> str:
+    """
+    Traverse callers and/or callees of a method to produce a semantic call graph using IntelliJ PSI.
+
+    Args:
+        method: Method reference, e.g. 'ClassName#methodName'.
+        direction: 'incoming' (callers), 'outgoing' (callees), or 'both'.
+        depth: Traversal depth (default: 2, max recommended: 4).
+        max_nodes: Maximum nodes to return (default: 50).
+    """
+    return json.dumps(psi_analyzer.get_call_graph(method, direction=direction, depth=depth, max_nodes=max_nodes), indent=2)
+
+
+@mcp.tool()
+def psi_explore_class_dependencies(
+    class_name: str,
+    direction: str = "both",
+    depth: int = 2,
+    include_jdk: bool = False,
+    include_libraries: bool = False,
+    max_classes: int = 50,
+) -> str:
+    """
+    Explore incoming and outgoing dependencies of a Java class via IntelliJ PSI.
+    Alternative to Neo4j class dependency graphs with real-time PSI fidelity.
+
+    Args:
+        class_name: Class name to explore.
+        direction: 'incoming' (dependents), 'outgoing' (dependencies), or 'both'.
+        depth: Dependency search depth (default: 2).
+        include_jdk: Include java.* / javax.* classes. Default is False.
+        include_libraries: Include external third-party library classes. Default is False.
+        max_classes: Maximum classes in graph. Default is 50.
+    """
+    return json.dumps(
+        psi_analyzer.explore_class_dependencies(
+            class_name=class_name,
+            direction=direction,
+            depth=depth,
+            include_jdk=include_jdk,
+            include_libraries=include_libraries,
+            max_classes=max_classes,
+        ),
+        indent=2,
+    )
+
+
+@mcp.tool()
+def psi_get_type_hierarchy(class_name: str, direction: str = "both") -> str:
+    """
+    Get the complete type inheritance hierarchy (subclasses, superclasses, implemented interfaces)
+    for a Java class or interface using IntelliJ PSI.
+
+    Args:
+        class_name: Class or interface name.
+        direction: 'subtypes', 'supertypes', or 'both'. Default is 'both'.
+    """
+    return json.dumps(psi_analyzer.get_type_hierarchy(class_name, direction=direction), indent=2)
+
+
+@mcp.tool()
+def psi_symbol_search(query: str, kind: str = "all", limit: int = 50) -> str:
+    """
+    Search symbols (classes, methods, fields) across the indexed IntelliJ project workspace.
+
+    Args:
+        query: Name query or pattern to search.
+        kind: 'class', 'method', 'field', or 'all'.
+        limit: Max results (default: 50).
+    """
+    return json.dumps(psi_analyzer.symbol_search(query, kind=kind, limit=limit), indent=2)
+
+
+@mcp.tool()
+def psi_get_file_inspections(file_path: str) -> str:
+    """
+    Run IntelliJ IDEA code inspections and linting checks on a file (routes to inspection server port 3001).
+
+    Args:
+        file_path: Absolute or workspace-relative path to the source file.
+    """
+    return json.dumps(psi_analyzer.get_file_inspections(file_path), indent=2)
 
 
 # ─── Entry Point ───────────────────────────────────────────────────────────────

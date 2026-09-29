@@ -81,6 +81,7 @@ function renderAll(data) {
   safeRun(() => renderPolicyRules(data.policy_rules || []), "policy_rules");
   safeRun(() => renderSmartTests(data.test_recommendations || {}), "smart_tests");
   safeRun(() => renderCoverity(data.coverity || {}), "coverity");
+  safeRun(() => renderOwners(data.module_owners || []), "owners");
 }
 
 // ── Hero Section ──────────────────────────────────────────────────────────────
@@ -625,6 +626,35 @@ function renderBlastRadius(items) {
   }).join("");
 }
 
+// ── Module Ownership ──────────────────────────────────────────────────────────
+
+function renderOwners(owners) {
+  const container = document.getElementById("owner-list");
+  if (!container) return;
+  if (!owners || !owners.length) {
+    container.innerHTML = emptyState("No module ownership data available. Need git commit history.");
+    return;
+  }
+  container.innerHTML = owners.map(o => {
+    const bus = o.bus_factor || 1;
+    const badgeClass = bus === 1 ? "bus-1" : bus === 2 ? "bus-2" : "bus-3";
+    const riskLabel = bus === 1 ? "Bus Factor 1 (High Risk)" : `Bus Factor ${bus}`;
+    const authors = Object.entries(o.all_authors || {})
+      .map(([auth, count]) => `${auth} (${count})`)
+      .join(", ") || o.owner || "unknown";
+
+    return `
+      <div class="owner-item">
+        <div>
+          <div class="owner-path" title="${escapeHtml(o.path)}">${escapeHtml(o.path)}</div>
+          <div class="owner-email">Top Owner: <strong style="color:var(--text-primary);">${escapeHtml(o.owner || "unknown")}</strong> (${o.owner_commit_share || 0}% commits) · Contributors: ${escapeHtml(authors)}</div>
+        </div>
+        <div class="bus-factor-badge ${badgeClass}">${riskLabel}</div>
+      </div>
+    `;
+  }).join("");
+}
+
 let visNetworkInstance = null;
 let cyInstance = null;
 
@@ -1025,4 +1055,140 @@ function copyPromptText(btn, text) {
 }
 
 
+// ── Neo4j Code Graph Tab ───────────────────────────────────────────────────────
+
+let neo4jLastNodes = [];
+
+async function neo4jSearch() {
+  const input   = document.getElementById("neo4j-input").value.trim();
+  const action  = document.getElementById("neo4j-action").value;
+  const depth   = parseInt(document.getElementById("neo4j-depth").value, 10);
+  const status  = document.getElementById("neo4j-status");
+  const results = document.getElementById("neo4j-results");
+  const empty   = document.getElementById("neo4j-empty");
+
+  if (!input) {
+    status.textContent = "⚠️ Please enter a class name.";
+    return;
+  }
+
+  status.textContent = "⏳ Querying Neo4j code graph...";
+  results.style.display = "none";
+  empty.style.display = "none";
+
+  // Build args for the chosen action
+  let args = {};
+  if (action === "find_by_name") {
+    args = { name: input, maxResults: 20 };
+  } else if (action === "run_graph_intelligence") {
+    args = { classNames: input.split(",").map(s => s.trim()) };
+  } else {
+    args = { className: input, depth };
+  }
+
+  try {
+    const base = window.location.protocol.startsWith("http")
+      ? ""
+      : "http://localhost:8765";
+    const url = `${base}/api/neo4j?action=${encodeURIComponent(action)}&args=${encodeURIComponent(JSON.stringify(args))}`;
+    const res = await fetch(url);
+    const data = await res.json();
+
+    if (!data.success) {
+      status.innerHTML = `❌ <strong>Error:</strong> ${data.error}`;
+      empty.style.display = "block";
+      return;
+    }
+
+    neo4jRenderResults(data, action, input);
+    status.textContent = "";
+  } catch (e) {
+    status.innerHTML = `❌ Failed to reach Neo4j API: ${e.message}`;
+    empty.style.display = "block";
+  }
+}
+
+function neo4jRenderResults(data, action, input) {
+  const results = document.getElementById("neo4j-results");
+  const empty   = document.getElementById("neo4j-empty");
+  const title   = document.getElementById("neo4j-table-title");
+  const tbody   = document.getElementById("neo4j-table-body");
+  const summary = document.getElementById("neo4j-summary");
+  const paths   = document.getElementById("neo4j-paths-box");
+
+  // Normalise nodes from different response shapes
+  let nodes = [];
+  const d = data.data || {};
+
+  if (Array.isArray(d.nodes))        nodes = d.nodes;
+  else if (Array.isArray(d.results)) nodes = d.results.map(r => r.node || r);
+  else if (d.classNode)              nodes = [d.classNode];
+  else if (d.interfaceNode)          nodes = [d.interfaceNode];
+  else if (d.testClass)              nodes = [d.testClass];
+  else if (Array.isArray(d.methods)) nodes = d.methods;
+  else                               nodes = [];
+
+  neo4jLastNodes = nodes;
+
+  if (nodes.length === 0) {
+    empty.style.display = "block";
+    document.getElementById("neo4j-status").textContent = "No results found in the graph.";
+    return;
+  }
+
+  // Title
+  const actionLabel = document.getElementById("neo4j-action").selectedOptions[0].text;
+  title.textContent = `${actionLabel} — "${input}" (${nodes.length} nodes)`;
+
+  // Summary chips
+  const types = {};
+  nodes.forEach(n => {
+    const t = (n.nodeLabels || [n.nodeType] || ["Node"])[0] || "Node";
+    types[t] = (types[t] || 0) + 1;
+  });
+  summary.innerHTML = Object.entries(types).map(([t, c]) =>
+    `<span style="background:var(--card-bg);border:1px solid var(--border-color);border-radius:20px;padding:4px 12px;font-size:12px;color:var(--text-muted);">${t} <strong style="color:var(--text-main);">${c}</strong></span>`
+  ).join("");
+
+  // Table rows
+  tbody.innerHTML = nodes.map((n, i) => {
+    const name      = n.name || n.className || "—";
+    const fullName  = n.fullName || "";
+    const filePath  = n.filePath || "";
+    const pkg       = n.packageName || (fullName.includes(".") ? fullName.substring(0, fullName.lastIndexOf(".")) : "—");
+    const type      = (n.nodeLabels || [n.nodeType] || [])[0] || "—";
+    const score     = n.combinedScore != null ? `⭐ ${n.combinedScore.toFixed(2)}`
+                    : n.pageRankScore  != null ? `📊 ${n.pageRankScore.toFixed(2)}`
+                    : "—";
+    const typeColor = type === "Class" ? "#7C3AED" : type === "TestClass" ? "#10B981" : type === "Interface" ? "#06B6D4" : "#6B7280";
+
+    return `<tr style="border-bottom:1px solid var(--border-color); transition:background 0.15s;" onmouseover="this.style.background='var(--card-bg)'" onmouseout="this.style.background=''">
+      <td style="padding:8px 12px; color:var(--text-muted);">${i + 1}</td>
+      <td style="padding:8px 12px; font-weight:600; font-family:'JetBrains Mono',monospace;">${name}</td>
+      <td style="padding:8px 12px;"><span style="background:${typeColor}22;color:${typeColor};padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;">${type}</span></td>
+      <td style="padding:8px 12px; color:var(--text-muted); font-size:12px;">${pkg}</td>
+      <td style="padding:8px 12px; font-size:12px;">${score}</td>
+      <td style="padding:8px 12px; font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--accent-light); word-break:break-all;">${filePath || "<em style='color:var(--text-muted)'>not mapped</em>"}</td>
+    </tr>`;
+  }).join("");
+
+  // File paths box
+  const pathList = nodes.map(n => n.filePath).filter(Boolean);
+  paths.textContent = pathList.length
+    ? pathList.join("\n")
+    : "(No file paths returned — try a traversal action like Expand Both)";
+
+  results.style.display = "block";
+  empty.style.display   = "none";
+}
+
+function neo4jCopyPaths() {
+  const pathList = neo4jLastNodes.map(n => n.filePath).filter(Boolean);
+  if (!pathList.length) {
+    alert("No file paths to copy.");
+    return;
+  }
+  navigator.clipboard.writeText(pathList.join("\n"));
+  showToastMsg(`✅ ${pathList.length} file paths copied to clipboard!`);
+}
 

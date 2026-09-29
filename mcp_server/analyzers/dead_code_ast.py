@@ -10,7 +10,7 @@ import os
 import re
 from pathlib import Path
 from collections import defaultdict, Counter
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 
 from .ast_adapters import ASTManager
 
@@ -34,7 +34,7 @@ class ASTDeadCodeDetector:
         self.repo_path = Path(repo_path).resolve()
         self.ast_manager = ASTManager()
 
-    def find_dead_code(self, limit_files: int = 250) -> List[Dict[str, Any]]:
+    def find_dead_code(self, limit_files: Optional[int] = None) -> List[Dict[str, Any]]:
         """
         Scans codebase and categorizes unused symbols into:
         - CONFIRMED_ISSUE: Unused private/local functions, unused imports
@@ -49,7 +49,7 @@ class ASTDeadCodeDetector:
         for root, dirs, files in os.walk(self.repo_path):
             dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
             for fname in files:
-                if file_count >= limit_files:
+                if limit_files is not None and limit_files > 0 and file_count >= limit_files:
                     break
                 fpath = Path(root) / fname
                 adapter = self.ast_manager.get_adapter(str(fpath))

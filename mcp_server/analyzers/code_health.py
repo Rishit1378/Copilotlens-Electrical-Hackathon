@@ -65,7 +65,7 @@ class CodeHealthScorer:
         total_lines = len(lines)
         return self._compute_score(filepath, content, lines, total_lines)
 
-    def score_all_files(self, limit: int = 200) -> list:
+    def score_all_files(self, limit: Optional[int] = None) -> list:
         """Score all source files in the repo. Returns sorted list."""
         results = []
         count = 0
@@ -77,7 +77,7 @@ class CodeHealthScorer:
                 ".next", "out", "dashboard-next"
             }]
             for fname in files:
-                if count >= limit:
+                if limit is not None and limit > 0 and count >= limit:
                     break
                 fpath = Path(root) / fname
                 if fpath.suffix.lower() in SUPPORTED_EXTENSIONS:

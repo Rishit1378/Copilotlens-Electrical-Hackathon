@@ -1,6 +1,7 @@
 # Local intelligence cache & generated outputs
 .copilotlens_cache.json
 .dashboard_cache.json
+.copilotlens_context.db
 coverity_findings.json
 _analysis_sizes.txt
 *.log
@@ -33,3 +34,6 @@ Thumbs.db
 
 # Demo repositories
 demo_project/
+
+# Local secrets
+.env

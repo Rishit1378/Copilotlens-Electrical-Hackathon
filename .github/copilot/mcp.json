@@ -3,9 +3,9 @@
     "copilotlens": {
       "command": "python",
       "args": [
-        "C:/Users/Z005878V/Downloads/CopilotLens-MCP-main/CopilotLens-MCP-main/mcp_server/server.py",
+        "C:/CoPilotLens/mcp_server/server.py",
         "--repo",
-        "C:/repos/iesd-25/clogic_src/src"
+        "${workspaceFolder}"
       ],
       "env": {
         "COPILOTLENS_PORT": "8765"

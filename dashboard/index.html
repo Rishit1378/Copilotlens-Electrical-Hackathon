@@ -117,6 +117,7 @@
     <button class="tab-btn" onclick="switchTab('cochange', this)">🔄 Co-Changes</button>
     <button class="tab-btn" onclick="switchTab('blastradius', this)">⚡ Blast Radius</button>
     <button class="tab-btn" onclick="switchTab('owners', this)">👥 Ownership</button>
+    <button class="tab-btn" onclick="switchTab('neo4j', this)">🔷 Code Graph</button>
   </div>
 
   <!-- Visual Graphify Tab -->
@@ -239,7 +240,7 @@
       <button class="btn-sync" onclick="openRememberRuleModal()" style="background: var(--accent-gradient);">+ Remember New Rule</button>
     </div>
 
-    <div class="policy-container" style="display: grid; grid-template-columns: 1fr 340fr; gap: 20px;">
+    <div class="policy-container" style="display: block; width: 100%;">
       <div class="policy-main">
         <div class="policy-filter-bar" style="margin-bottom: 16px; display: flex; gap: 10px;">
           <button class="filter-btn active" onclick="filterRules('all', this)">All Rules</button>
@@ -278,6 +279,17 @@
         </div>
         <pre id="distilled-trace-output" class="trace-box">Run tests to capture and distill output failure traces...</pre>
       </div>
+    </div>
+  </section>
+
+  <!-- Hotspots Tab -->
+  <section class="tab-panel" id="tab-hotspots">
+    <div class="section-header">
+      <h2>🔥 Code Churn Hotspots</h2>
+      <p>Files changed most frequently in git history — statistically the most defect-prone and critical areas</p>
+    </div>
+    <div class="hotspot-list" id="hotspot-list">
+      <div class="loading-state"><div class="spinner"></div><p>Analyzing commit history & churn...</p></div>
     </div>
   </section>
 
@@ -346,6 +358,83 @@
     <div class="owner-list" id="owner-list">
       <div class="loading-state"><div class="spinner"></div><p>Analyzing ownership...</p></div>
     </div>
+  <!-- Neo4j Code Graph Tab -->
+  <section class="tab-panel" id="tab-neo4j">
+    <div class="section-header">
+      <div>
+        <h2>🔷 Neo4j Code Graph Navigator</h2>
+        <p>Traverse the Capital codebase graph to find architecturally relevant classes and rank them by importance for Copilot context.</p>
+      </div>
+    </div>
+
+    <!-- Search Bar -->
+    <div style="display:flex; gap:10px; margin-bottom:20px; align-items:center;">
+      <input id="neo4j-input" type="text" placeholder="Class name (e.g. HarnessAssembly)" style="flex:1; padding:10px 14px; border-radius:8px; border:1px solid var(--border-subtle); background:var(--bg-card); color:var(--text-primary); font-size:14px; font-family:inherit;" onkeydown="if(event.key==='Enter') neo4jSearch()" />
+      <select id="neo4j-action" style="padding:10px 14px; border-radius:8px; border:1px solid var(--border-subtle); background:var(--bg-card); color:var(--text-primary); font-size:13px;">
+        <option value="find_by_name">🔍 Find by Name</option>
+        <option value="expand_both">↔ Expand Both (neighbourhood)</option>
+        <option value="expand_class_out">→ Expand Out (depends on)</option>
+        <option value="expand_class_in">← Expand In (depended on by)</option>
+        <option value="get_class_full">📋 Full Class Detail</option>
+        <option value="get_class_hierarchy">🏛 Class Hierarchy</option>
+        <option value="get_uncovered_methods">🧪 Uncovered Methods</option>
+        <option value="get_related_test_classes">🧪 Related Tests</option>
+        <option value="run_graph_intelligence">⭐ Graph Intelligence (rank)</option>
+      </select>
+      <select id="neo4j-depth" style="padding:10px 14px; border-radius:8px; border:1px solid var(--border-subtle); background:var(--bg-card); color:var(--text-primary); font-size:13px;">
+        <option value="1">Depth 1</option>
+        <option value="2">Depth 2</option>
+        <option value="3">Depth 3</option>
+      </select>
+      <button onclick="neo4jSearch()" style="padding:10px 20px; border-radius:8px; background:var(--gradient-brand); color:#fff; border:none; cursor:pointer; font-weight:600; font-size:13px;">Search Graph</button>
+    </div>
+
+    <!-- Status / Loading -->
+    <div id="neo4j-status" style="font-size:13px; color:var(--text-muted); margin-bottom:12px; min-height:20px;"></div>
+
+    <!-- Results -->
+    <div id="neo4j-results" style="display:none;">
+
+      <!-- Summary strip -->
+      <div id="neo4j-summary" style="display:flex; gap:16px; margin-bottom:20px; flex-wrap:wrap;"></div>
+
+      <!-- Results Table -->
+      <div class="card" style="overflow:auto;">
+        <div class="card-header">
+          <h3 class="card-title" id="neo4j-table-title">Results</h3>
+          <button onclick="neo4jCopyPaths()" style="padding:6px 14px; border-radius:6px; background:var(--accent-purple); color:#fff; border:none; cursor:pointer; font-size:12px;">📋 Copy File Paths</button>
+        </div>
+        <table style="width:100%; border-collapse:collapse; font-size:13px;">
+          <thead>
+            <tr style="border-bottom:1px solid var(--border-subtle); color:var(--text-muted);">
+              <th style="padding:8px 12px; text-align:left;">#</th>
+              <th style="padding:8px 12px; text-align:left;">Class</th>
+              <th style="padding:8px 12px; text-align:left;">Type</th>
+              <th style="padding:8px 12px; text-align:left;">Package</th>
+              <th style="padding:8px 12px; text-align:left;">Score</th>
+              <th style="padding:8px 12px; text-align:left;">File Path</th>
+            </tr>
+          </thead>
+          <tbody id="neo4j-table-body"></tbody>
+        </table>
+      </div>
+
+      <!-- Ranked File Paths for Copilot -->
+      <div class="card" style="margin-top:16px;">
+        <div class="card-header">
+          <h3 class="card-title">⚡ Ready-to-use Copilot Context</h3>
+        </div>
+        <p style="font-size:12px; color:var(--text-muted); margin-bottom:10px;">Copy these file paths and paste into Copilot Agent Mode to load the optimal context for your task.</p>
+        <pre id="neo4j-paths-box" style="background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:8px; padding:14px; font-size:12px; font-family:'JetBrains Mono',monospace; white-space:pre-wrap; word-break:break-all; max-height:200px; overflow:auto;"></pre>
+      </div>
+    </div>
+
+    <!-- Empty state -->
+    <div id="neo4j-empty" style="text-align:center; padding:60px 20px; color:var(--text-muted);">
+      <div style="font-size:48px; margin-bottom:12px;">🔷</div>
+      <div style="font-size:16px; font-weight:600; margin-bottom:6px;">Neo4j Code Graph</div>
+      <div style="font-size:13px;">Enter a class name above and click Search Graph to navigate the Capital codebase architecture.</div>
+    </div>
   </section>
 
 </main>
@@ -360,7 +449,7 @@
   </div>
   <div class="copilot-prompts">
     <button class="prompt-chip" onclick="copyPrompt(this)" data-prompt="What are the top hotspots in this codebase and why are they risky?">🔥 Show hotspots</button>
-    <button class="prompt-chip" onclick="copyPrompt(this)" data-prompt="Calculate the blast radius and minimal review set for enatega-multivendor-app/src/screens/CreateAccount/useCreateAccount.android.js">⚡ Blast Radius & Token Savings</button>
+    <button class="prompt-chip" onclick="copyPrompt(this)" data-prompt="Calculate the blast radius and minimal review set for key hotspot files">⚡ Blast Radius & Token Savings</button>
     <button class="prompt-chip" onclick="copyPrompt(this)" data-prompt="Generate a safe refactoring plan for the lowest-scored file in this codebase">🏥 Refactor plan</button>
     <button class="prompt-chip" onclick="copyPrompt(this)" data-prompt="Find all dead code candidates and suggest which ones to remove first">🧹 Dead code cleanup</button>
     <button class="prompt-chip" onclick="copyPrompt(this)" data-prompt="What are the co-change pairs with high coupling in this repo?">🔄 Show co-change pairs</button>
@@ -368,7 +457,6 @@
   </div>
   <div class="copied-toast" id="copied-toast">Copied! Paste in Copilot Agent mode</div>
 </div>
-<!-- End of Copilot Panel (fixed at bottom) -->
 
 <!-- ── Footer ───────────────────────────────────────────────────────────────── -->
 <footer class="footer" style="padding: 16px 24px 80px; font-size: 11px; color: var(--text-muted); display: flex; justify-content: space-between;">

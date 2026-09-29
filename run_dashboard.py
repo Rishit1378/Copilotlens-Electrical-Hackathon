@@ -90,20 +90,24 @@ def run_analysis():
     coverity_summary = coverity_analyzer.get_summary()
     print(f"[+] {coverity_summary['total_defects']} Coverity defects found across {coverity_summary['affected_files_count']} files (Compliance: {coverity_summary['rule_compliance_score']}%)")
 
+    module_owners = git_analyzer.get_module_owners()
+    print(f"[+] {len(module_owners)} module owners tracked")
+
     DASHBOARD_DATA = {
         "status": "ready",
         "repo_path": REPO,
         "health": health_data,
         "hotspots": hotspots,
-        "dead_code": dead_code[:20],
+        "dead_code": dead_code,
         "coverity": coverity_summary,
+        "module_owners": module_owners,
         "dependency_graph": {
-            "nodes": dep_graph["nodes"][:80],
-            "edges": dep_graph["edges"][:200],
+            "nodes": dep_graph["nodes"],
+            "edges": dep_graph["edges"],
             "circular": dep_graph.get("circular_dependencies", []),
-            "orphans": dep_graph.get("orphan_files", [])[:15]
+            "orphans": dep_graph.get("orphan_files", [])
         },
-        "co_change_pairs": co_change_pairs[:25],
+        "co_change_pairs": co_change_pairs,
         "blast_radius": blast_radius_data,
         "repo_summary": repo_summary
     }

@@ -179,7 +179,7 @@ class GitAnalyzer:
         result.sort(key=lambda x: x["bus_factor"])
         return result[:50]
 
-    def get_co_change_pairs(self, min_co_changes: int = 3) -> list:
+    def get_co_change_pairs(self, min_co_changes: Optional[int] = None) -> list:
         """
         Find files that are frequently modified in the same commit — hidden coupling.
         These files are coupled by behavior even if they don't import each other.
@@ -187,7 +187,7 @@ class GitAnalyzer:
         """
         # Get all commits with their changed files
         raw = self._run_git(
-            "log", "--since=90 days ago",
+            "log", "--since=365 days ago",
             "--pretty=format:COMMIT",
             "--name-only"
         )
@@ -212,20 +212,33 @@ class GitAnalyzer:
         for file_set in commits:
             files = sorted(file_set)
             for i in range(len(files)):
-                for j in range(i + 1, min(i + 10, len(files))):
+                for j in range(i + 1, min(i + 15, len(files))):
                     pair = (files[i], files[j])
                     pair_counts[pair] += 1
+
+        # Determine effective minimum threshold:
+        # If user explicitly supplied min_co_changes, use that.
+        # Otherwise, dynamically adapt: try 3, then 2, then 1 so young or shallow repos still display pairs.
+        if min_co_changes is not None:
+            effective_min = min_co_changes
+        else:
+            if any(cnt >= 3 for cnt in pair_counts.values()):
+                effective_min = 3
+            elif any(cnt >= 2 for cnt in pair_counts.values()):
+                effective_min = 2
+            else:
+                effective_min = 1
 
         # Filter and format
         results = []
         for (f1, f2), count in pair_counts.most_common(30):
-            if count >= min_co_changes:
+            if count >= effective_min:
                 results.append({
                     "file_a": f1,
                     "file_b": f2,
                     "co_change_count": count,
-                    "coupling_strength": "HIGH" if count >= 8 else "MEDIUM" if count >= 5 else "LOW",
-                    "insight": f"Modified together {count}x — likely coupled in behavior"
+                    "coupling_strength": "HIGH" if count >= 8 else "MEDIUM" if count >= 4 else "LOW",
+                    "insight": f"Modified together {count}x — coupled in behavior"
                 })
 
         return results
