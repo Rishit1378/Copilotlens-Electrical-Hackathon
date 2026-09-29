@@ -113,13 +113,40 @@ Now hook CopilotLens into IntelliJ so GitHub Copilot can invoke it directly.
 
 ---
 
-### Step 5: Enable & Test in IntelliJ GitHub Copilot
+### Step 5: (Optional) Configure Integrations in `.env`
+
+Create a `.env` file in the root of CopilotLens (`C:\tools\copilotlens\.env`) to enable Atlassian, Neo4j, and IntelliJ PSI tools:
+
+```env
+# Atlassian Integrations (Jira, Confluence, Bitbucket)
+ATLASSIAN_BASE_URL=https://ies-iesd-jira.ies.mentorg.com
+ATLASSIAN_EMAIL=your.name@company.com
+ATLASSIAN_API_TOKEN=your_pat_or_api_token
+ATLASSIAN_JIRA_PROJECT=PROJ
+ATLASSIAN_CONFLUENCE_SPACE=SPACE
+BITBUCKET_BASE_URL=https://ies-iesd-bitbucket.ies.mentorg.com
+
+# Neo4j Enterprise Code Graph
+NEO4J_URI=bolt://10.103.236.11
+NEO4J_USERNAME=neo4j
+NEO4J_PASSWORD=your_password
+NEO4J_DATABASE=neo4j
+
+# IntelliJ PSI Tools (running in IntelliJ)
+PSI_TOOLS_HOST=localhost
+PSI_TOOLS_PORT=3000
+PSI_TOOLS_INSPECTION_PORT=3001
+```
+
+---
+
+### Step 6: Enable & Test in IntelliJ GitHub Copilot
 
 1. **Open your Bitbucket repository in IntelliJ IDEA** (`C:\work\my-app`).
 2. Restart IntelliJ if it was open.
 3. Open **GitHub Copilot Chat** window (usually on the right sidebar).
 4. Switch Copilot Chat mode from *Ask* to **Agent mode** (or enable Tools/MCP in Copilot settings).
-5. Click the 🔧 **Tools / MCP** icon in the Copilot chat window and verify **`copilotlens`** is listed and enabled.
+5. Click the 🔧 **Tools / MCP** icon in the Copilot chat window and verify **`copilotlens`** is listed and enabled with 79 tools.
 
 6. **Test a query in Copilot Chat:**
    ```text
@@ -144,3 +171,6 @@ Now hook CopilotLens into IntelliJ so GitHub Copilot can invoke it directly.
 | Copilot doesn't call tools | `mcp.json` path is incorrect or invalid JSON | Double check forward slashes `/` in path inside `mcp.json` |
 | Port 8765 in use | Another dashboard process is running | Change `"COPILOTLENS_PORT": "8766"` in `mcp.json` |
 | No git history data | Git repository depth is too shallow | Run `git fetch --unshallow` inside your Bitbucket repo |
+| PSI tools connection refused | IntelliJ PSI Tools plugin not running | Verify IntelliJ is running and PSI daemon listens on ports 3000/3001 |
+| Neo4j connection failure | VPN/Network access issue | Ensure active connection to corporate network/VPN for `bolt://10.103.236.11` |
+

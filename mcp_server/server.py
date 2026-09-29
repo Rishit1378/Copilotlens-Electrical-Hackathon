@@ -140,8 +140,8 @@ IMPORTANT WORKFLOW RULES:
 2. Always call get_hotspots() when asked about risky or problematic areas of the codebase.
 3. Always call get_copilot_context(file_path) at the start of any coding task to load approved project rules.
 4. When a developer says "Do not...", "Never...", "Always use...", "Remember this rule:", or corrects your output,
-   call analyze_copilot_interaction(interaction_text) to extract and save the rule.
-5. When a developer says "remember this rule" explicitly, call remember_rule() to store it immediately.
+   call analyze_copilot_interaction(interaction_text, auto_approve_high_confidence=True) to extract, store, and approve the rule into the policy repository.
+5. When a developer says "remember this rule" or gives an explicit directive, call remember_rule(rule=..., auto_approve=True) to store and activate it immediately.
 6. Use get_project_rules() to list all stored conventions at any time.
 7. Use review_policy_rule(rule_id, action) to approve/reject/edit rules on developer request.
 8. When asked about class relationships, dependencies, or architectural context for Java code,
@@ -494,98 +494,10 @@ def get_blast_radius(file_path: str) -> str:
     return json.dumps(result, indent=2)
 
 
-@mcp.tool()
-def analyze_copilot_interaction(interaction_text: str, auto_approve_high_confidence: bool = False) -> str:
-    """
-    Analyze Copilot chat interactions or developer prompts to extract rules, conventions, and corrections.
-    Extracts rule title, preferred approach, scope (file/folder/language/project), rationale, source, and confidence level.
-    Stores extracted rules in the local policy repository for review before syncing to Copilot instructions.
-
-    Args:
-        interaction_text: Developer prompt or Copilot chat snippet e.g., 'Do not update server.py directly'
-        auto_approve_high_confidence: Auto-approve high-confidence rules immediately if True
-    """
-    result = interaction_analyzer.analyze_interaction(interaction_text, auto_approve_high_confidence)
-    return json.dumps(result, indent=2)
 
 
-@mcp.tool()
-def remember_rule(rule: str, preferred_approach: str = "", scope: str = "project", rationale: str = "") -> str:
-    """
-    Explicit developer command to submit and approve a rule into the local policy repository.
-    Use this when chat transcript access is unavailable or when explicitly commanded ("Remember this rule: ...").
-    Approved rules are saved and synchronized to .github/copilot-instructions.md for IntelliJ IDEA and VS Code.
-
-    Args:
-        rule: Concise rule instruction e.g. 'Always use async/await for DB operations'
-        preferred_approach: Optional detailed pattern or preferred coding approach
-        scope: Target file path, module, language, or 'project'
-        rationale: Reason for rule
-    """
-    entry = policy_repo.add_rule(
-        rule=rule,
-        preferred_approach=preferred_approach or rule,
-        scope=scope or "project",
-        rationale=rationale or "Explicit developer command",
-        source_interaction="remember_rule command",
-        confidence_level="HIGH",
-        status="APPROVED"
-    )
-    return json.dumps({
-        "status": "APPROVED",
-        "message": f"Rule remembered and synced to .github/copilot-instructions.md",
-        "rule": entry
-    }, indent=2)
 
 
-@mcp.tool()
-def review_rules(status_filter: str = "all", scope_filter: str = "") -> str:
-    """
-    Review rules in the local policy repository.
-    Filter by status: 'pending', 'approved', 'rejected', or 'all'.
-
-    Args:
-        status_filter: Filter by status ('pending', 'approved', 'rejected', 'all')
-        scope_filter: Optional scope filter string
-    """
-    rules = policy_repo.list_rules(status_filter=status_filter, scope_filter=scope_filter)
-    return json.dumps({
-        "status_filter": status_filter,
-        "count": len(rules),
-        "rules": rules
-    }, indent=2)
-
-
-@mcp.tool()
-def manage_rule(rule_id: str, action: str, preferred_approach: str = "", scope: str = "") -> str:
-    """
-    Approve, reject, edit, or delete a rule in the policy repository.
-    Approving or deleting rules automatically synchronizes .github/copilot-instructions.md.
-
-    Args:
-        rule_id: ID of the rule to manage (e.g. 'rule-1727400000-1')
-        action: Action to perform: 'approve', 'reject', 'edit', or 'delete'
-        preferred_approach: Updated preferred approach text if editing
-        scope: Updated scope if editing
-    """
-    res = policy_repo.update_rule_status(rule_id=rule_id, action=action, preferred_approach=preferred_approach, scope=scope)
-    return json.dumps(res, indent=2)
-
-
-@mcp.tool()
-def get_approved_rules(scope: str = "") -> str:
-    """
-    Get all active approved rules from the policy repository to provide contextual guidance to Copilot.
-
-    Args:
-        scope: Optional target file path, module, or scope filter
-    """
-    rules = policy_repo.get_approved_rules(scope=scope)
-    return json.dumps({
-        "scope": scope or "project",
-        "count": len(rules),
-        "approved_rules": rules
-    }, indent=2)
 
 
 @mcp.tool()
