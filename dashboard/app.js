@@ -368,15 +368,35 @@ function renderPolicyRules(rules) {
 }
 
 async function manageRule(ruleId, action) {
+  // Optimistic UI update: immediately mutate local state so user sees click take effect
+  if (dashboardData && Array.isArray(dashboardData.policy_rules)) {
+    if (action === "delete") {
+      dashboardData.policy_rules = dashboardData.policy_rules.filter(r => r.id !== ruleId);
+    } else if (action === "approve") {
+      const target = dashboardData.policy_rules.find(r => r.id === ruleId);
+      if (target) target.status = "APPROVED";
+    } else if (action === "reject") {
+      const target = dashboardData.policy_rules.find(r => r.id === ruleId);
+      if (target) target.status = "REJECTED";
+    }
+    renderPolicyRules(dashboardData.policy_rules);
+  }
+
   try {
-    await fetch("/api/manage-rule", {
+    const res = await fetch("/api/manage-rule", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ rule_id: ruleId, action: action })
     });
+    if (!res.ok) {
+      console.warn("Manage rule HTTP status:", res.status);
+    }
+    // Background sync
     loadData();
   } catch (e) {
     console.error("Manage rule error:", e);
+    // Reload on error to restore true state
+    loadData();
   }
 }
 

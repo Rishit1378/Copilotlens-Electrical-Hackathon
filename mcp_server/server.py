@@ -1492,11 +1492,23 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 confidence_level="HIGH",
                 status="APPROVED"
             )
+            # Invalidate dashboard cache immediately so UI refreshes with new rule
+            global _DASHBOARD_CACHE, _DASHBOARD_LAST_RUN
+            with _DASHBOARD_LOCK:
+                if _DASHBOARD_CACHE and "policy_rules" in _DASHBOARD_CACHE:
+                    _DASHBOARD_CACHE["policy_rules"] = policy_repo.list_rules()
+                _DASHBOARD_LAST_RUN = 0.0
             self._send_json(200, {"status": "SUCCESS", "rule": res})
         elif self.path == "/api/manage-rule":
             rule_id = req_json.get("rule_id", "")
             action = req_json.get("action", "")
             res = policy_repo.update_rule_status(rule_id=rule_id, action=action)
+            # Invalidate dashboard cache immediately so UI reflects approve/reject/delete
+            global _DASHBOARD_CACHE, _DASHBOARD_LAST_RUN
+            with _DASHBOARD_LOCK:
+                if _DASHBOARD_CACHE and "policy_rules" in _DASHBOARD_CACHE:
+                    _DASHBOARD_CACHE["policy_rules"] = policy_repo.list_rules()
+                _DASHBOARD_LAST_RUN = 0.0
             self._send_json(200, res)
         elif self.path == "/api/run-tests":
             res = smart_test_analyzer.run_recommended_tests()
