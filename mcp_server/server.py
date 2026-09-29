@@ -1468,6 +1468,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
         pass  # Suppress default HTTP logs
 
     def do_POST(self):
+        global _DASHBOARD_CACHE, _DASHBOARD_LAST_RUN
         length = int(self.headers.get('Content-Length', 0))
         body_data = self.rfile.read(length).decode('utf-8') if length > 0 else "{}"
         try:
@@ -1493,7 +1494,6 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 status="APPROVED"
             )
             # Invalidate dashboard cache immediately so UI refreshes with new rule
-            global _DASHBOARD_CACHE, _DASHBOARD_LAST_RUN
             with _DASHBOARD_LOCK:
                 if _DASHBOARD_CACHE and "policy_rules" in _DASHBOARD_CACHE:
                     _DASHBOARD_CACHE["policy_rules"] = policy_repo.list_rules()
@@ -1504,7 +1504,6 @@ class DashboardHandler(BaseHTTPRequestHandler):
             action = req_json.get("action", "")
             res = policy_repo.update_rule_status(rule_id=rule_id, action=action)
             # Invalidate dashboard cache immediately so UI reflects approve/reject/delete
-            global _DASHBOARD_CACHE, _DASHBOARD_LAST_RUN
             with _DASHBOARD_LOCK:
                 if _DASHBOARD_CACHE and "policy_rules" in _DASHBOARD_CACHE:
                     _DASHBOARD_CACHE["policy_rules"] = policy_repo.list_rules()
