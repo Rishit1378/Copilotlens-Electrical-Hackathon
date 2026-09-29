@@ -853,18 +853,60 @@ def analyze_xml_design(xml_input: str, detail: str = "summary") -> str:
 
 
 @mcp.tool()
-def generate_logic_action(action_name: str, target_object: str = "DEVICE_CONNECTOR", package_name: str = "chs.caplets.logic.actions") -> str:
+def generate_logic_action(action_name: str, target_object: str = "", package_name: str = "chs.caplets.logic.actions",
+                          spec_json: str = "") -> str:
     """
-    Generate production-ready Java Caplet Action boilerplate (subclassing AbstractAction),
-    XML action configuration snippet, and JUnit component test scaffold for Capital Logic.
+    Step 1 of the Capital Logic Action Change Set workflow: PLAN a new Logic action.
+    Scans the Capital repo (spec.capital_repo / $CAPITAL_REPO) for sibling actions, LogicController
+    registrations, LogicResource menus/toolbars, ribbon.xml groups, bundles and derivative controllers,
+    and returns a question for every undecided product decision (action type, selection, mutation,
+    applications, menu, ribbon group, gating, immersed mode...). Nothing is guessed or written.
+    Ask the developer every blocking question, merge the answers into spec_json and call again until
+    status == "ready", then call generate_logic_action_changeset.
 
     Args:
-        action_name: Name of the action (e.g., 'RemoveLibPartAction')
-        target_object: Target domain object type (e.g. 'DEVICE_CONNECTOR', 'BACKSHELL', 'MULTICORE')
-        package_name: Target Java package name (default is 'chs.caplets.logic.actions')
+        action_name: Action class name (e.g. 'RefreshConnectivityAction')
+        target_object: Optional target object / selection type (e.g. 'DEVICE_CONNECTOR')
+        package_name: Java package (default 'chs.caplets.logic.actions')
+        spec_json: Optional full ActionSpec JSON (fields listed in the plan's questions)
     """
-    res = action_generator.generate_action(action_name, target_object, package_name)
-    return json.dumps(res, indent=2)
+    res = action_generator.generate_action(action_name, target_object or None, package_name, spec_json)
+    return json.dumps(res, indent=2, default=str)
+
+
+@mcp.tool()
+def generate_logic_action_changeset(spec_json: str) -> str:
+    """
+    Step 2: build the full Logic Action Change Set for a spec whose plan is "ready":
+    Action + ActionUI + JUnit 3 test, LogicController/derivative registration, LogicResource
+    menu/toolbar registration, resource bundle keys (+ localization report), ribbon.xml button and
+    ribbon keys, icon checks and validation. Returns unified diffs and a changeset_id. Writes nothing
+    to the Capital repo. Present the report and diffs to the developer for review.
+
+    Args:
+        spec_json: Complete ActionSpec JSON (same as used for planning)
+    """
+    res = action_generator.generate_changeset(spec_json)
+    markdown = res.pop("report_markdown", None)
+    body = json.dumps(res, indent=2, default=str)
+    return (markdown + "\n\n---\n```json\n" + body + "\n```") if markdown else body
+
+
+@mcp.tool()
+def apply_logic_action_changeset(changeset_id: str, run_build: bool = False) -> str:
+    """
+    Step 3: apply a reviewed Logic Action Change Set to the Capital repo. Refuses if any target file
+    changed since generation and rolls back on write failure. With run_build=true, runs
+    $CAPITAL_BUILD_CMD and $CAPITAL_TEST_CMD ({test_class}/{test_fqn} placeholders).
+
+    Args:
+        changeset_id: ID returned by generate_logic_action_changeset
+        run_build: Run the configured build and targeted test after writing
+    """
+    res = action_generator.apply_changeset(changeset_id, run_build)
+    markdown = res.pop("report_markdown", None)
+    body = json.dumps(res, indent=2, default=str)
+    return (markdown + "\n\n---\n```json\n" + body + "\n```") if markdown else body
 
 
 @mcp.tool()
