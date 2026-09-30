@@ -53,39 +53,45 @@ c:\CoPilotLens\
 
 ---
 
-## Current State (v1.0 - What Already Works)
+## Current State (v2.0 - What Already Works)
 
-### MCP Tools (all working, all defined in server.py)
+### Analyzers (20 Total Analyzers in `mcp_server/analyzers/` & `integrations/`)
+1. `PsiToolsAnalyzer` (`psi_analyzer.py`): IntelliJ IDEA native PSI semantic engine (symbols, method bodies, call graphs, type hierarchy, inspections).
+2. `Neo4jAnalyzer` (`neo4j_analyzer.py`): 27 actions over Neo4j Bolt graph (classes, tests, coverage, PageRank, betweenness, Cypher).
+3. `CoverityAnalyzer` (`coverity_analyzer.py`): SAST security rule scanner, finding persistence, and automated fix prompts.
+4. `CLogicSessionAnalyzer` (`clogic_session_analyzer.py`): Live Capital Logic / CManager session poller and state inspector.
+5. `XmlAnalyzer` (`xml_analyzer.py`): Capital XML design and scenario analyzer.
+6. `DrcValidator` (`drc_validator.py`): Heuristic Capital Design Rule Checks (DRC).
+7. `LogicActionGenerator` (`logic_action_generator.py`): Java Caplet Action + config + JUnit generator.
+8. `ContextScraper` (`context_scraper.py`): BM25 semantic ranker & SQLite context database for Jira/Confluence/Bitbucket.
+9. `GitAnalyzer` (`git_analyzer.py`): Git log churn, hotspots, adaptive co-changes, module ownership (git blame).
+10. `CodeHealthScorer` (`code_health.py`): 13 deterministic markers, 0–100 score & grades.
+11. `DependencyAnalyzer` (`dependency.py`): Import graph, hub files, circular dependencies.
+12. `DeadCodeDetector` & `ASTDeadCodeDetector` (`dead_code.py`, `dead_code_ast.py`): Confirmed unused functions/classes.
+13. `WhyAnalyzer` (`why_analyzer.py`): Git archaeology & commit rationale.
+14. `CodebaseSearch` (`search_analyzer.py`): High-speed regex, symbol search.
+15. `BlastRadiusAnalyzer` (`blast_radius.py`): 100x token savings ripple effect calculator.
+16. `PolicyRepository` & `CopilotInteractionAnalyzer` (`policy_repo.py`): Auto-learning conventions & instructions sync.
+17. `SmartTestAnalyzer` (`smart_test_analyzer.py`): AST diff changed symbols, test recommendation & log distiller.
+18. `CodebaseKnowledgeGraph` (`codebase_graph.py`): Multi-hop in-memory contextual graph.
+19. `AnalysisCache` (`cache.py`): Incremental `.copilotlens_cache.json` caching.
+20. `Atlassian Integrations` (`jira.py`, `confluence.py`, `bitbucket.py`): Enterprise REST clients for Data Center/Server and Cloud.
 
-| Tool | Analyzer | Status |
-|---|---|---|
-| `get_file_health(path)` | `code_health.py` | Working |
-| `get_hotspots(n)` | `git_analyzer.py` | Working |
-| `get_codebase_summary()` | both | Working |
-| `get_dead_code()` | `dead_code.py` | Working (regex-based, needs AST upgrade in Phase 2) |
-| `get_dependency_graph()` | `dependency.py` | Working |
-| `get_file_dependencies(path)` | `dependency.py` | Working |
-| `get_module_owners()` | `git_analyzer.py` | Working |
-| `generate_copilot_instructions()` | all | Working |
-| `get_dashboard_url()` | - | Working |
-| `get_why(path)` | `why_analyzer.py` | Working |
-| `search_codebase(query)` | `search_analyzer.py` | Working |
-| `find_symbol_usages(name)` | `search_analyzer.py` | Working |
-| `get_co_change_pairs()` | `git_analyzer.py` | Working |
-| `get_named_imports(path)` | `dependency.py` | Working |
-| `get_blast_radius(path)` | `blast_radius.py` | Working |
-
-### Known Limitations (things to fix in v2.0)
-
-- `dead_code.py` uses word-count only — no scope awareness, high false positive rate
-- `dependency.py` uses regex for imports — can't resolve aliased imports or dynamic require()
-- `code_health.py` has no real cyclomatic complexity (just branch-count ratio as proxy)
-- No Atlassian integration (zero Jira/Confluence/Bitbucket)
-- No test intelligence (only detects test files by filename pattern)
-- No Tree-sitter (everything is regex or line-count heuristics)
-- No Coverity integration
+### Active MCP Tools (81 total defined in `mcp_server/server.py`)
+- **IntelliJ PSI Engine (9)**: `psi_health_check`, `psi_get_class_structure`, `psi_get_method_body`, `psi_find_usages`, `psi_get_call_graph`, `psi_explore_class_dependencies`, `psi_get_type_hierarchy`, `psi_symbol_search`, `psi_get_file_inspections`
+- **Neo4j Code Graph (27)**: `neo4j_find_class`, `neo4j_get_class`, `neo4j_get_interface`, `neo4j_get_class_methods`, `neo4j_get_test_class`, `neo4j_find_by_filepath`, `neo4j_expand_out`, `neo4j_expand_in`, `neo4j_expand_both`, `neo4j_get_class_hierarchy`, `neo4j_get_related_tests`, `neo4j_expand_test_out`, `neo4j_expand_test_in`, `neo4j_expand_test_both`, `neo4j_get_uncovered_methods`, `neo4j_get_test_infrastructure`, `neo4j_find_similar_tested_classes`, `neo4j_get_package_coverage`, `neo4j_graph_intelligence`, `neo4j_pagerank`, `neo4j_betweenness`, `neo4j_run_cypher`, `neo4j_filter_by_field`, `neo4j_filter_by_annotation`, `neo4j_search_methods`, `neo4j_lookup_enum`, `neo4j_lookup_nested_classes`
+- **Coverity SAST (4)**: `get_coverity_findings`, `get_coverity_summary`, `import_coverity_json`, `run_coverity_scan`
+- **Capital Logic & DRC (6)**: `analyze_xml_design`, `generate_logic_action`, `generate_logic_action_changeset`, `apply_logic_action_changeset`, `validate_design_drc`, `inspect_live_clogic_session`
+- **Context Scraper & Atlassian (10)**: `scrape_extended_context`, `get_cached_context`, `get_jira_issues_for_file`, `create_jira_issue`, `update_jira_issue`, `get_confluence_page`, `update_confluence_page`, `get_pr_context`, `annotate_pr`, `get_recent_prs`
+- **Code Health & Git (6)**: `get_file_health`, `get_codebase_summary`, `get_hotspots`, `get_co_change_pairs`, `get_module_owners`, `get_why`
+- **Dead Code & Dependencies (5)**: `get_dead_code`, `get_dependency_graph`, `get_file_dependencies`, `get_named_imports`, `get_blast_radius`
+- **Search (2)**: `search_codebase`, `find_symbol_usages`
+- **Smart Tests & Distiller (4)**: `analyze_changed_symbols`, `recommend_tests`, `distill_test_output`, `run_recommended_tests`
+- **Policy Repository & Rules (6)**: `remember_rule`, `analyze_copilot_interaction`, `get_project_rules`, `review_policy_rule`, `generate_copilot_instructions`, `get_copilot_context`
+- **Dashboard & Subgraphs (2)**: `get_dashboard_url`, `query_codebase_graph`
 
 ---
+
 
 ## v2.0 Phase Status
 

@@ -26,6 +26,7 @@ import json
 import os
 import sys
 import threading
+import time
 from typing import Any, Dict, List, Optional
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
@@ -140,8 +141,8 @@ IMPORTANT WORKFLOW RULES:
 2. Always call get_hotspots() when asked about risky or problematic areas of the codebase.
 3. Always call get_copilot_context(file_path) at the start of any coding task to load approved project rules.
 4. When a developer says "Do not...", "Never...", "Always use...", "Remember this rule:", or corrects your output,
-   call analyze_copilot_interaction(interaction_text) to extract and save the rule.
-5. When a developer says "remember this rule" explicitly, call remember_rule() to store it immediately.
+   call analyze_copilot_interaction(interaction_text, auto_approve_high_confidence=True) to extract, store, and approve the rule into the policy repository.
+5. When a developer says "remember this rule" or gives an explicit directive, call remember_rule(rule=..., auto_approve=True) to store and activate it immediately.
 6. Use get_project_rules() to list all stored conventions at any time.
 7. Use review_policy_rule(rule_id, action) to approve/reject/edit rules on developer request.
 8. When asked about class relationships, dependencies, or architectural context for Java code,
@@ -494,98 +495,10 @@ def get_blast_radius(file_path: str) -> str:
     return json.dumps(result, indent=2)
 
 
-@mcp.tool()
-def analyze_copilot_interaction(interaction_text: str, auto_approve_high_confidence: bool = False) -> str:
-    """
-    Analyze Copilot chat interactions or developer prompts to extract rules, conventions, and corrections.
-    Extracts rule title, preferred approach, scope (file/folder/language/project), rationale, source, and confidence level.
-    Stores extracted rules in the local policy repository for review before syncing to Copilot instructions.
-
-    Args:
-        interaction_text: Developer prompt or Copilot chat snippet e.g., 'Do not update server.py directly'
-        auto_approve_high_confidence: Auto-approve high-confidence rules immediately if True
-    """
-    result = interaction_analyzer.analyze_interaction(interaction_text, auto_approve_high_confidence)
-    return json.dumps(result, indent=2)
 
 
-@mcp.tool()
-def remember_rule(rule: str, preferred_approach: str = "", scope: str = "project", rationale: str = "") -> str:
-    """
-    Explicit developer command to submit and approve a rule into the local policy repository.
-    Use this when chat transcript access is unavailable or when explicitly commanded ("Remember this rule: ...").
-    Approved rules are saved and synchronized to .github/copilot-instructions.md for IntelliJ IDEA and VS Code.
-
-    Args:
-        rule: Concise rule instruction e.g. 'Always use async/await for DB operations'
-        preferred_approach: Optional detailed pattern or preferred coding approach
-        scope: Target file path, module, language, or 'project'
-        rationale: Reason for rule
-    """
-    entry = policy_repo.add_rule(
-        rule=rule,
-        preferred_approach=preferred_approach or rule,
-        scope=scope or "project",
-        rationale=rationale or "Explicit developer command",
-        source_interaction="remember_rule command",
-        confidence_level="HIGH",
-        status="APPROVED"
-    )
-    return json.dumps({
-        "status": "APPROVED",
-        "message": f"Rule remembered and synced to .github/copilot-instructions.md",
-        "rule": entry
-    }, indent=2)
 
 
-@mcp.tool()
-def review_rules(status_filter: str = "all", scope_filter: str = "") -> str:
-    """
-    Review rules in the local policy repository.
-    Filter by status: 'pending', 'approved', 'rejected', or 'all'.
-
-    Args:
-        status_filter: Filter by status ('pending', 'approved', 'rejected', 'all')
-        scope_filter: Optional scope filter string
-    """
-    rules = policy_repo.list_rules(status_filter=status_filter, scope_filter=scope_filter)
-    return json.dumps({
-        "status_filter": status_filter,
-        "count": len(rules),
-        "rules": rules
-    }, indent=2)
-
-
-@mcp.tool()
-def manage_rule(rule_id: str, action: str, preferred_approach: str = "", scope: str = "") -> str:
-    """
-    Approve, reject, edit, or delete a rule in the policy repository.
-    Approving or deleting rules automatically synchronizes .github/copilot-instructions.md.
-
-    Args:
-        rule_id: ID of the rule to manage (e.g. 'rule-1727400000-1')
-        action: Action to perform: 'approve', 'reject', 'edit', or 'delete'
-        preferred_approach: Updated preferred approach text if editing
-        scope: Updated scope if editing
-    """
-    res = policy_repo.update_rule_status(rule_id=rule_id, action=action, preferred_approach=preferred_approach, scope=scope)
-    return json.dumps(res, indent=2)
-
-
-@mcp.tool()
-def get_approved_rules(scope: str = "") -> str:
-    """
-    Get all active approved rules from the policy repository to provide contextual guidance to Copilot.
-
-    Args:
-        scope: Optional target file path, module, or scope filter
-    """
-    rules = policy_repo.get_approved_rules(scope=scope)
-    return json.dumps({
-        "scope": scope or "project",
-        "count": len(rules),
-        "approved_rules": rules
-    }, indent=2)
 
 
 @mcp.tool()
@@ -853,18 +766,60 @@ def analyze_xml_design(xml_input: str, detail: str = "summary") -> str:
 
 
 @mcp.tool()
-def generate_logic_action(action_name: str, target_object: str = "DEVICE_CONNECTOR", package_name: str = "chs.caplets.logic.actions") -> str:
+def generate_logic_action(action_name: str, target_object: str = "", package_name: str = "chs.caplets.logic.actions",
+                          spec_json: str = "") -> str:
     """
-    Generate production-ready Java Caplet Action boilerplate (subclassing AbstractAction),
-    XML action configuration snippet, and JUnit component test scaffold for Capital Logic.
+    Step 1 of the Capital Logic Action Change Set workflow: PLAN a new Logic action.
+    Scans the Capital repo (spec.capital_repo / $CAPITAL_REPO) for sibling actions, LogicController
+    registrations, LogicResource menus/toolbars, ribbon.xml groups, bundles and derivative controllers,
+    and returns a question for every undecided product decision (action type, selection, mutation,
+    applications, menu, ribbon group, gating, immersed mode...). Nothing is guessed or written.
+    Ask the developer every blocking question, merge the answers into spec_json and call again until
+    status == "ready", then call generate_logic_action_changeset.
 
     Args:
-        action_name: Name of the action (e.g., 'RemoveLibPartAction')
-        target_object: Target domain object type (e.g. 'DEVICE_CONNECTOR', 'BACKSHELL', 'MULTICORE')
-        package_name: Target Java package name (default is 'chs.caplets.logic.actions')
+        action_name: Action class name (e.g. 'RefreshConnectivityAction')
+        target_object: Optional target object / selection type (e.g. 'DEVICE_CONNECTOR')
+        package_name: Java package (default 'chs.caplets.logic.actions')
+        spec_json: Optional full ActionSpec JSON (fields listed in the plan's questions)
     """
-    res = action_generator.generate_action(action_name, target_object, package_name)
-    return json.dumps(res, indent=2)
+    res = action_generator.generate_action(action_name, target_object or None, package_name, spec_json)
+    return json.dumps(res, indent=2, default=str)
+
+
+@mcp.tool()
+def generate_logic_action_changeset(spec_json: str) -> str:
+    """
+    Step 2: build the full Logic Action Change Set for a spec whose plan is "ready":
+    Action + ActionUI + JUnit 3 test, LogicController/derivative registration, LogicResource
+    menu/toolbar registration, resource bundle keys (+ localization report), ribbon.xml button and
+    ribbon keys, icon checks and validation. Returns unified diffs and a changeset_id. Writes nothing
+    to the Capital repo. Present the report and diffs to the developer for review.
+
+    Args:
+        spec_json: Complete ActionSpec JSON (same as used for planning)
+    """
+    res = action_generator.generate_changeset(spec_json)
+    markdown = res.pop("report_markdown", None)
+    body = json.dumps(res, indent=2, default=str)
+    return (markdown + "\n\n---\n```json\n" + body + "\n```") if markdown else body
+
+
+@mcp.tool()
+def apply_logic_action_changeset(changeset_id: str, run_build: bool = False) -> str:
+    """
+    Step 3: apply a reviewed Logic Action Change Set to the Capital repo. Refuses if any target file
+    changed since generation and rolls back on write failure. With run_build=true, runs
+    $CAPITAL_BUILD_CMD and $CAPITAL_TEST_CMD ({test_class}/{test_fqn} placeholders).
+
+    Args:
+        changeset_id: ID returned by generate_logic_action_changeset
+        run_build: Run the configured build and targeted test after writing
+    """
+    res = action_generator.apply_changeset(changeset_id, run_build)
+    markdown = res.pop("report_markdown", None)
+    body = json.dumps(res, indent=2, default=str)
+    return (markdown + "\n\n---\n```json\n" + body + "\n```") if markdown else body
 
 
 @mcp.tool()
@@ -1359,96 +1314,153 @@ def get_copilot_context(file_path: str = "", task_description: str = "") -> str:
 
 # ─── Dashboard HTTP Server ─────────────────────────────────────────────────────
 
+_DASHBOARD_CACHE: Dict[str, Any] = {}
+_DASHBOARD_LAST_RUN: float = 0.0
+_DASHBOARD_LOCK = threading.Lock()
+_DASHBOARD_IS_ANALYZING = False
+
+
+def _refresh_dashboard_data_async():
+    """Background worker that computes heavy codebase metrics without blocking HTTP requests."""
+    global _DASHBOARD_CACHE, _DASHBOARD_LAST_RUN, _DASHBOARD_IS_ANALYZING
+    with _DASHBOARD_LOCK:
+        if _DASHBOARD_IS_ANALYZING:
+            return
+        _DASHBOARD_IS_ANALYZING = True
+
+    def _worker():
+        global _DASHBOARD_CACHE, _DASHBOARD_LAST_RUN, _DASHBOARD_IS_ANALYZING
+        try:
+            health = health_scorer.get_summary()
+        except Exception:
+            health = {"avg_score": 0, "distribution": {}, "worst_files": [], "best_files": []}
+
+        try:
+            hotspots = git_analyzer.get_hotspots(15)
+        except Exception:
+            hotspots = []
+
+        try:
+            dead = ast_dead_code_detector.find_dead_code(limit_files=500)
+        except Exception:
+            dead = []
+
+        try:
+            graph = dep_analyzer.build_graph()
+        except Exception:
+            graph = {"nodes": [], "edges": [], "circular_dependencies": [], "orphan_files": []}
+
+        try:
+            repo_summary = git_analyzer.get_repo_summary()
+        except Exception:
+            repo_summary = {}
+
+        try:
+            rules = policy_repo.list_rules()
+        except Exception:
+            rules = []
+
+        try:
+            kg = knowledge_graph.build_graph()
+        except Exception:
+            kg = {"nodes": [], "edges": [], "node_count": 0, "edge_count": 0}
+
+        try:
+            test_recs = smart_test_analyzer.recommend_tests(["mcp_server/server.py"])
+        except Exception:
+            test_recs = {"minimal_test_set": []}
+
+        try:
+            coverity_summary = coverity_analyzer.get_summary()
+        except Exception:
+            coverity_summary = {"total_defects": 0, "rule_compliance_score": 100, "by_severity": {}, "by_checker": {}, "affected_files_count": 0, "findings": []}
+
+        try:
+            module_owners = git_analyzer.get_module_owners()
+        except Exception:
+            module_owners = []
+
+        try:
+            co_changes = git_analyzer.get_co_change_pairs()
+        except Exception:
+            co_changes = []
+
+        try:
+            blast_data = []
+            target_sample = []
+            for pair in co_changes[:3]:
+                target_sample.append(pair["file_a"])
+            for h in hotspots[:3]:
+                if h.get("path") and h["path"] not in target_sample:
+                    target_sample.append(h["path"])
+            for target_path in target_sample[:5]:
+                blast_data.append(blast_analyzer.calculate_blast_radius(target_path))
+        except Exception:
+            blast_data = []
+
+        with _DASHBOARD_LOCK:
+            _DASHBOARD_CACHE = {
+                "status": "ready",
+                "repo_path": REPO_PATH,
+                "health": health,
+                "hotspots": hotspots,
+                "dead_code": dead,
+                "policy_rules": rules,
+                "knowledge_graph": kg,
+                "test_recommendations": test_recs,
+                "coverity": coverity_summary,
+                "module_owners": module_owners,
+                "co_change_pairs": co_changes,
+                "blast_radius": blast_data,
+                "dependency_graph": {
+                    "nodes": graph["nodes"],
+                    "edges": graph["edges"],
+                    "circular": graph.get("circular_dependencies", []),
+                    "orphans": graph.get("orphan_files", [])
+                },
+                "repo_summary": repo_summary
+            }
+            _DASHBOARD_LAST_RUN = time.time()
+            _DASHBOARD_IS_ANALYZING = False
+
+    t = threading.Thread(target=_worker, daemon=True)
+    t.start()
+
+
 def get_dashboard_data() -> dict:
-    """Collect all analysis data for the dashboard."""
-    try:
-        health = health_scorer.get_summary()
-    except Exception:
-        health = {"avg_score": 0, "distribution": {}, "worst_files": [], "best_files": []}
+    """Collect all analysis data for the dashboard with non-blocking cache return."""
+    global _DASHBOARD_CACHE, _DASHBOARD_LAST_RUN
+    now = time.time()
     
-    try:
-        hotspots = git_analyzer.get_hotspots(15)
-    except Exception:
-        hotspots = []
-    
-    try:
-        dead = ast_dead_code_detector.find_dead_code()
-    except Exception:
-        dead = []
-    
-    try:
-        graph = dep_analyzer.build_graph()
-    except Exception:
-        graph = {"nodes": [], "edges": [], "circular_dependencies": [], "orphan_files": []}
-    
-    try:
-        repo_summary = git_analyzer.get_repo_summary()
-    except Exception:
-        repo_summary = {}
+    # If cache is valid (within 300s / 5 minutes), return it immediately
+    if _DASHBOARD_CACHE and (now - _DASHBOARD_LAST_RUN < 300):
+        return _DASHBOARD_CACHE
 
-    try:
-        rules = policy_repo.list_rules()
-    except Exception:
-        rules = []
+    # Trigger background analysis if cache is empty or stale
+    _refresh_dashboard_data_async()
 
-    try:
-        kg = knowledge_graph.build_graph()
-    except Exception:
-        kg = {"nodes": [], "edges": [], "node_count": 0, "edge_count": 0}
+    # If cache exists (even slightly stale), return it while refreshing
+    if _DASHBOARD_CACHE:
+        return _DASHBOARD_CACHE
 
-    try:
-        test_recs = smart_test_analyzer.recommend_tests(["mcp_server/server.py"])
-    except Exception:
-        test_recs = {"minimal_test_set": []}
-
-    try:
-        coverity_summary = coverity_analyzer.get_summary()
-    except Exception:
-        coverity_summary = {"total_defects": 0, "rule_compliance_score": 100, "by_severity": {}, "by_checker": {}, "affected_files_count": 0, "findings": []}
-
-    try:
-        module_owners = git_analyzer.get_module_owners()
-    except Exception:
-        module_owners = []
-
-    try:
-        co_changes = git_analyzer.get_co_change_pairs()
-    except Exception:
-        co_changes = []
-
-    try:
-        blast_data = []
-        target_sample = []
-        for pair in co_changes[:3]:
-            target_sample.append(pair["file_a"])
-        for h in hotspots[:3]:
-            if h.get("path") and h["path"] not in target_sample:
-                target_sample.append(h["path"])
-        for target_path in target_sample[:5]:
-            blast_data.append(blast_analyzer.calculate_blast_radius(target_path))
-    except Exception:
-        blast_data = []
-
+    # First load placeholder so the browser gets an immediate HTTP 200 response
     return {
+        "status": "loading",
         "repo_path": REPO_PATH,
-        "health": health,
-        "hotspots": hotspots,
-        "dead_code": dead,
-        "policy_rules": rules,
-        "knowledge_graph": kg,
-        "test_recommendations": test_recs,
-        "coverity": coverity_summary,
-        "module_owners": module_owners,
-        "co_change_pairs": co_changes,
-        "blast_radius": blast_data,
-        "dependency_graph": {
-            "nodes": graph["nodes"],
-            "edges": graph["edges"],
-            "circular": graph.get("circular_dependencies", []),
-            "orphans": graph.get("orphan_files", [])
-        },
-        "repo_summary": repo_summary
+        "health": {"avg_score": 0, "distribution": {}, "worst_files": [], "best_files": []},
+        "hotspots": [],
+        "dead_code": [],
+        "policy_rules": [],
+        "knowledge_graph": {"nodes": [], "edges": [], "node_count": 0, "edge_count": 0},
+        "test_recommendations": {"minimal_test_set": []},
+        "coverity": {"total_defects": 0, "rule_compliance_score": 100, "by_severity": {}, "by_checker": {}, "affected_files_count": 0, "findings": []},
+        "module_owners": [],
+        "co_change_pairs": [],
+        "blast_radius": [],
+        "dependency_graph": {"nodes": [], "edges": [], "circular": [], "orphans": []},
+        "repo_summary": {}
     }
+
 
 
 class DashboardHandler(BaseHTTPRequestHandler):
@@ -1456,6 +1468,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
         pass  # Suppress default HTTP logs
 
     def do_POST(self):
+        global _DASHBOARD_CACHE, _DASHBOARD_LAST_RUN
         length = int(self.headers.get('Content-Length', 0))
         body_data = self.rfile.read(length).decode('utf-8') if length > 0 else "{}"
         try:
@@ -1480,11 +1493,21 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 confidence_level="HIGH",
                 status="APPROVED"
             )
+            # Invalidate dashboard cache immediately so UI refreshes with new rule
+            with _DASHBOARD_LOCK:
+                if _DASHBOARD_CACHE and "policy_rules" in _DASHBOARD_CACHE:
+                    _DASHBOARD_CACHE["policy_rules"] = policy_repo.list_rules()
+                _DASHBOARD_LAST_RUN = 0.0
             self._send_json(200, {"status": "SUCCESS", "rule": res})
         elif self.path == "/api/manage-rule":
             rule_id = req_json.get("rule_id", "")
             action = req_json.get("action", "")
             res = policy_repo.update_rule_status(rule_id=rule_id, action=action)
+            # Invalidate dashboard cache immediately so UI reflects approve/reject/delete
+            with _DASHBOARD_LOCK:
+                if _DASHBOARD_CACHE and "policy_rules" in _DASHBOARD_CACHE:
+                    _DASHBOARD_CACHE["policy_rules"] = policy_repo.list_rules()
+                _DASHBOARD_LAST_RUN = 0.0
             self._send_json(200, res)
         elif self.path == "/api/run-tests":
             res = smart_test_analyzer.run_recommended_tests()
@@ -1526,13 +1549,16 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self._send_json(200, result)
         elif self.path == "/api/data":
             data = get_dashboard_data()
-            body = json.dumps(data).encode()
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.send_header("Content-Length", len(body))
-            self.end_headers()
-            self.wfile.write(body)
+            body = json.dumps(data).encode("utf-8")
+            try:
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.send_header("Content-Length", len(body))
+                self.end_headers()
+                self.wfile.write(body)
+            except (ConnectionResetError, ConnectionAbortedError, BrokenPipeError):
+                pass
         elif self.path == "/api/sync-instructions":
             result = generate_copilot_instructions()
             body = result.encode("utf-8")
@@ -1582,7 +1608,13 @@ class DashboardHandler(BaseHTTPRequestHandler):
 def start_dashboard():
     """Start the dashboard HTTP server in a background thread."""
     try:
-        server = HTTPServer(("localhost", DASHBOARD_PORT), DashboardHandler)
+        from http.server import ThreadingHTTPServer
+        ServerClass = ThreadingHTTPServer
+    except Exception:
+        ServerClass = HTTPServer
+
+    try:
+        server = ServerClass(("0.0.0.0", DASHBOARD_PORT), DashboardHandler)
         print(f"[CopilotLens] Dashboard: http://localhost:{DASHBOARD_PORT}", file=sys.stderr, flush=True)
         server.serve_forever()
     except OSError as e:

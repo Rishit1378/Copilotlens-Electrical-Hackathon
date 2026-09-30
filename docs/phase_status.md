@@ -97,24 +97,72 @@ Update this after completing each phase or sub-task.
 ---
 
 ## Phase 5: Neo4j Knowledge Graph
-**Status: DEFERRED — fully documented in docs/neo4j_design.md**
+**Status: COMPLETED**
+**Tested against: Bolt `bolt://10.103.236.11` via `neo4j_analyzer.py` & Node CLI**
 
-No implementation until user decides to proceed.
+### Completed Tasks
+- [x] Integrate 27 Neo4j Code Graph actions (`neo4j_find_class`, `neo4j_get_class_hierarchy`, `neo4j_pagerank`, `neo4j_run_cypher`, etc.)
+- [x] Connect Python analyzer subprocess wrapper to `neo4j_cli.mjs`
+- [x] Register 27 `@mcp.tool()` definitions in `mcp_server/server.py`
+- [x] Add Neo4j query panel and graph controls to local dashboard
 
 ---
 
-## Phase 6: Coverity Integration
-**Status: WAITING FOR FILE PATH**
+## Phase 6: Coverity SAST Integration
+**Status: COMPLETED**
+**Output File: `coverity_findings.json`**
 
-### Pending from user
-- [ ] Path to Coverity JSON file on disk
+### Completed Tasks
+- [x] Create `mcp_server/analyzers/coverity_analyzer.py`
+- [x] Parse Coverity standard exports (`cov-format-errors --json-output-v8`) and custom rule reports
+- [x] Implement composite health scoring integration (-25 pts for Coverity rule failures)
+- [x] Add MCP tool: `get_coverity_findings(file_path, severity)`
+- [x] Add MCP tool: `get_coverity_summary()`
+- [x] Add MCP tool: `import_coverity_json(json_content_or_path)`
+- [x] Add MCP tool: `run_coverity_scan()`
+- [x] Add interactive Coverity SAST view in web dashboard (`dashboard/index.html`)
 
-### Tasks (once file path provided)
-- [ ] Create mcp_server/analyzers/coverity_analyzer.py
-- [ ] Parse Coverity JSON format (cov-format-errors --json-output-v8)
-- [ ] Implement composite risk score (Coverity impact + git churn)
-- [ ] Add MCP tool: get_coverity_findings(file_path)
-- [ ] Add MCP tool: get_coverity_summary()
-- [ ] Add MCP tool: get_high_risk_coverity()
-- [ ] Add Coverity panel to dashboard (index.html + app.js)
-- [ ] Document in coverity_setup.md
+---
+
+## Phase 7: IntelliJ Native PSI Semantic Engine
+**Status: COMPLETED**
+**Daemon Ports: `localhost:3000` (PSI Structure) / `localhost:3001` (Inspections)**
+
+### Completed Tasks
+- [x] Create `mcp_server/analyzers/psi_analyzer.py`
+- [x] Implement JSON-RPC HTTP caller with automatic fallback to PowerShell runner `psi_tools_cli.ps1`
+- [x] Add 9 MCP tools:
+  - `psi_health_check`
+  - `psi_get_class_structure`
+  - `psi_get_method_body`
+  - `psi_find_usages`
+  - `psi_get_call_graph`
+  - `psi_explore_class_dependencies`
+  - `psi_get_type_hierarchy`
+  - `psi_symbol_search`
+  - `psi_get_file_inspections`
+
+---
+
+## Phase 8: Capital Logic (CLogic) & DRC Engine
+**Status: COMPLETED**
+
+### Completed Tasks
+- [x] Create `xml_analyzer.py` for Capital XML designs & scenarios
+- [x] Create `drc_validator.py` for Capital Design Rule Checks
+- [x] Create `logic_action_generator.py` for full 3-step Logic Action Change Set workflow (Plan -> Generate Changeset -> Apply & Test)
+- [x] Create `clogic_session_analyzer.py` for live session monitoring
+- [x] Add 6 MCP tools: `analyze_xml_design`, `generate_logic_action`, `generate_logic_action_changeset`, `apply_logic_action_changeset`, `validate_design_drc`, `inspect_live_clogic_session`
+
+---
+
+## Phase 9: BM25 Semantic Context Scraper
+**Status: COMPLETED**
+**Cache: `.copilotlens_context.db` (SQLite)**
+
+### Completed Tasks
+- [x] Create `mcp_server/analyzers/context_scraper.py`
+- [x] Implement BM25 ranker for noise elimination across Jira, Confluence, and Bitbucket
+- [x] Implement SQLite cache storage with auto-schema creation
+- [x] Add MCP tools: `scrape_extended_context`, `get_cached_context`
+
