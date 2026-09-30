@@ -627,4 +627,210 @@ class XmlAnalyzer:
             lines.append(f"{prefix}{'└─ ' if last else '├─ '}{label}")
             lines += cls._tree_lines(n.get("children", []), prefix + ("   " if last else "│  "))
         return lines
+    def _discover_reference_samples(self) -> List[str]:
+        """Automatically load XML reference files from the local training folder."""
+        samples: List[str] = []
+        candidates = []
+        ref_dir = self.repo_path / ".copilot-xml-reference"
+        if ref_dir.exists():
+            candidates.extend(sorted(ref_dir.rglob("*.xml")))
+            candidates.extend(sorted(ref_dir.rglob("*.XML")))
+        for p in sorted(self.repo_path.glob("*.xml")):
+            if p.name.startswith(".copilot-xml-reference") or p.name.endswith(".xml"):
+                candidates.append(p)
+        seen = set()
+        for path in candidates:
+            if str(path) in seen:
+                continue
+            seen.add(str(path))
+            try:
+                if path.is_file() and path.stat().st_size <= 50 * 1024 * 1024:
+                    samples.append(path.read_text(encoding="utf-8", errors="replace"))
+            except OSError:
+                continue
+        return samples[:20]
+
+    def learn_design_patterns(self, xml_examples: str = "") -> Dict[str, Any]:
+        """Learn a Capital-like XML schema from sample exports and return a reusable generation profile."""
+        examples = self._collect_xml_examples(xml_examples) if xml_examples else self._discover_reference_samples()
+        if not examples:
+            return self._default_generation_profile()
+
+        tag_counts: Counter = Counter()
+        tag_attributes: Dict[str, Counter] = defaultdict(Counter)
+        hierarchy_paths: Dict[str, int] = defaultdict(int)
+        root_tags: Counter = Counter()
+        observed_objects: set = set()
+
+        for xml_text in examples:
+            try:
+                if len(xml_text.encode("utf-8", errors="ignore")) > 50 * 1024 * 1024:
+                    continue
+                root = ET.fromstring(xml_text)
+            except (ET.ParseError, OverflowError, ValueError, MemoryError):
+                continue
+            root_tags[self._local_tag(root.tag).lower()] += 1
+            for elem in root.iter():
+                tag = self._local_tag(elem.tag).lower()
+                if not tag:
+                    continue
+                tag_counts[tag] += 1
+                observed_objects.add(tag)
+                for attr_name in elem.attrib:
+                    tag_attributes[tag][attr_name.lower()] += 1
+                if tag in self._DOMAIN_TAGS:
+                    path = self._path_signature(elem)
+                    if path:
+                        hierarchy_paths[path] += 1
+
+        ranked_tags = [
+            {"tag": tag, "count": count, "common_attributes": sorted(tag_attributes.get(tag, {}).items(), key=lambda kv: (-kv[1], kv[0]))[:8]}
+            for tag, count in tag_counts.most_common(20)
+        ]
+        hierarchy = [
+            {"path": path, "count": count}
+            for path, count in sorted(hierarchy_paths.items(), key=lambda kv: (-kv[1], kv[0]))[:12]
+        ]
+        generated_schema = {
+            "root_tags": dict(root_tags),
+            "common_tags": ranked_tags,
+            "hierarchy_paths": hierarchy,
+            "likely_design_nodes": sorted(t for t in observed_objects if t in self._DOMAIN_TAGS),
+            "generation_hints": self._generation_hints(ranked_tags),
+        }
+        return {
+            "status": "ok",
+            "example_count": len(examples),
+            "schema": generated_schema,
+            "summary": "Learned object-and-hierarchy patterns from the provided XML examples. These patterns can be used to synthesize a matching project skeleton or to adapt a new design description.",
+        }
+
+    def generate_design_xml_from_requirements(self, requirements: str, xml_examples: str = "") -> Dict[str, Any]:
+        """Translate natural-language design requirements into a Capital-style XML project file."""
+        learned = self.learn_design_patterns(xml_examples) if xml_examples else self.learn_design_patterns()
+        req = (requirements or "").strip()
+        if not req:
+            req = "Generate a generic harness project with 1 device, 2 connectors, and 8 signal pins."
+
+        project_name = self._extract_name(req)
+        device_count = self._extract_count(req, ["device", "module", "assembly"])
+        connector_count = self._extract_count(req, ["connector", "plug", "receptacle"]) or max(device_count, 1)
+        pin_count = self._extract_count(req, ["pin", "cavity", "terminal"]) or max(connector_count * 2, 4)
+        bundle_count = self._extract_count(req, ["bundle", "harness", "cable", "wire"]) or 1
+        signal_count = self._extract_count(req, ["signal", "net", "wire"]) or max(pin_count, 8)
+
+        project = ET.Element("project", name=project_name or "GeneratedProject")
+        design = ET.SubElement(project, "logicaldesign", {"name": f"{project_name or 'Generated'}Design", "id": "ld-1", "version": "1.0"})
+        if bundle_count > 0:
+            for idx in range(1, bundle_count + 1):
+                bundle = ET.SubElement(design, "bundle", {"name": f"{project_name or 'Harness'}_bundle_{idx}", "id": f"bundle-{idx}", "type": "harness"})
+                if idx == 1 and signal_count:
+                    for signal_idx in range(1, min(signal_count, 12) + 1):
+                        ET.SubElement(bundle, "signal", {"name": f"signal_{signal_idx}", "id": f"signal-{idx}-{signal_idx}", "type": "electrical"})
+
+        for device_idx in range(1, max(device_count, 1) + 1):
+            device = ET.SubElement(design, "device", {"name": f"{project_name or 'Device'}_{device_idx}", "id": f"device-{device_idx}", "partnumber": f"DEV-{device_idx:03d}", "libraryref": f"LIB-{device_idx:03d}"})
+            for connector_idx in range(1, max(connector_count, 1) + 1):
+                connector = ET.SubElement(device, "deviceconnector", {"name": f"connector_{device_idx}_{connector_idx}", "id": f"deviceconnector-{device_idx}-{connector_idx}", "type": "male", "partnumber": f"CON-{device_idx:03d}-{connector_idx:02d}"})
+                for pin_idx in range(1, max(pin_count, 1) + 1):
+                    ET.SubElement(connector, "pin", {"name": f"pin_{device_idx}_{connector_idx}_{pin_idx}", "id": f"pin-{device_idx}-{connector_idx}-{pin_idx}", "pintype": "signal"})
+
+        if "ground" in req.lower() or "shield" in req.lower():
+            ground = ET.SubElement(design, "ground", {"name": f"{project_name or 'Ground'}_return", "id": "ground-1"})
+            ET.SubElement(ground, "signal", {"name": "ground_signal", "id": "ground-signal-1"})
+
+        pretty = self._pretty_print_xml(ET.tostring(project, encoding="unicode"))
+        generated_dir = self.repo_path / ".copilot-xml-reference" / "generated"
+        generated_dir.mkdir(parents=True, exist_ok=True)
+        output_file = generated_dir / f"{project_name or 'generated_project'}.xml"
+        output_file.write_text(pretty, encoding="utf-8")
+        return {"status": "ok", "project_name": project_name or "GeneratedProject", "confidence": "medium", "learned_schema": learned, "design_summary": {"device_count": max(device_count, 1), "connector_count": max(connector_count, 1), "pin_count": max(pin_count, 1), "bundle_count": max(bundle_count, 1)}, "output_file": str(output_file), "notes": ["The XML project file was written to .copilot-xml-reference/generated.", "Add part numbers, library references, and completion details for a production-ready export."]}
+
+    @staticmethod
+    def _collect_xml_examples(xml_examples: str) -> List[str]:
+        if not xml_examples or not xml_examples.strip():
+            return []
+        candidates = [piece.strip() for piece in re.split(r"[\r\n,;]+", xml_examples) if piece.strip()]
+        samples: List[str] = []
+        for candidate in candidates:
+            if "<" in candidate:
+                if len(candidate.encode("utf-8", errors="ignore")) <= 50 * 1024 * 1024:
+                    samples.append(candidate)
+                continue
+            path = Path(candidate)
+            if path.exists() and path.is_file():
+                try:
+                    if path.stat().st_size > 50 * 1024 * 1024:
+                        continue
+                    samples.append(path.read_text(encoding="utf-8", errors="replace"))
+                except OSError:
+                    pass
+        return samples
+
+    @staticmethod
+    def _path_signature(elem: ET.Element) -> str:
+        parts = []
+        current = elem
+        while current is not None:
+            tag = XmlAnalyzer._local_tag(current.tag).lower()
+            if tag:
+                parts.append(tag)
+            current = current.getparent() if hasattr(current, 'getparent') else None
+        return " > ".join(reversed(parts))
+
+    @staticmethod
+    def _extract_name(requirements: str) -> str:
+        patterns = [
+            r"(?:project|design)\s+(?:name\s+)?['\"]?([A-Za-z0-9_][A-Za-z0-9_ -]*?)(?=\s+(?:with|and|for|using|including|containing|having|version|of)|$)",
+            r"create\s+(?:a\s+)?(?:project|design)\s+(?:called\s+)?['\"]?([A-Za-z0-9_][A-Za-z0-9_ -]*?)(?=\s+(?:with|and|for|using|including|containing|having|version|of)|$)",
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, requirements, flags=re.IGNORECASE)
+            if match:
+                value = match.group(1).strip()
+                cleaned = re.sub(r"\s+", " ", value).strip()
+                if cleaned and cleaned.lower() not in {"project", "design"}:
+                    return cleaned
+        fallback = re.sub(r"[^a-zA-Z0-9_ -]+", " ", requirements.lower()).strip()
+        fallback = re.sub(r"\s+", " ", fallback)
+        if fallback and len(fallback.split()) <= 5:
+            return fallback.title().replace(" ", "_")
+        return "GeneratedProject"
+
+    @staticmethod
+    def _extract_count(requirements: str, keywords: List[str]) -> int:
+        text = requirements.lower()
+        for keyword in keywords:
+            match = re.search(rf"(\d+)\s+{keyword}s?\b", text)
+            if match:
+                return int(match.group(1))
+            match = re.search(rf"{keyword}s?\s*(?:of\s*)?(\d+)", text)
+            if match:
+                return int(match.group(1))
+        for match in re.finditer(r"(\d+)\s+([a-z]+)", text):
+            qty, noun = match.groups()
+            if noun in {k[:-1] if k.endswith("s") else k for k in keywords}:
+                return int(qty)
+        return 0
+
+    @staticmethod
+    def _generation_hints(tags: List[Dict[str, Any]]) -> List[str]:
+        hints = ["Use project → logicaldesign → device → deviceconnector → pin hierarchy for a canonical harness layout."]
+        if any(t["tag"] == "bundle" for t in tags):
+            hints.append("Bundle and signal objects are a good fit for cable/harness-level wiring definitions.")
+        if any(t["tag"] == "ground" for t in tags):
+            hints.append("Ground or shield objects can be added when the design includes return paths or protective shielding.")
+        return hints
+
+    def _default_generation_profile(self) -> Dict[str, Any]:
+        return {"status": "ok", "example_count": 0, "schema": {"root_tags": {"project": 1}, "common_tags": [{"tag": "project", "count": 1, "common_attributes": ["name"]}, {"tag": "logicaldesign", "count": 1, "common_attributes": ["name", "version"]}, {"tag": "device", "count": 1, "common_attributes": ["name", "partnumber", "libraryref"]}, {"tag": "deviceconnector", "count": 1, "common_attributes": ["name", "type", "partnumber"]}, {"tag": "pin", "count": 1, "common_attributes": ["name", "pintype"]}, {"tag": "bundle", "count": 1, "common_attributes": ["name", "type"]}], "hierarchy_paths": [{"path": "project > logicaldesign > device > deviceconnector > pin", "count": 1}, {"path": "project > logicaldesign > bundle > signal", "count": 1}], "likely_design_nodes": ["project", "logicaldesign", "device", "deviceconnector", "pin", "bundle", "signal"], "generation_hints": ["Use project → logicaldesign → device → deviceconnector → pin hierarchy for a canonical harness layout.", "Bundle and signal objects are a good fit for cable and harness-level wiring definitions."]}, "summary": "No sample XML was provided, so the tool used the built-in Capital XML conventions for a default skeleton."}
+
+    @staticmethod
+    def _pretty_print_xml(xml_text: str) -> str:
+        try:
+            parsed = minidom.parseString(xml_text)
+            return parsed.toprettyxml(indent="  ").replace("\n\n", "\n")
+        except Exception:
+            return xml_text
+
 
